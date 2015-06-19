@@ -1,14 +1,21 @@
 from random import randint, choice
 from itertools import izip_longest
+from string import maketrans
 import matplotlib
 matplotlib.use('Agg')
 from matplotlib import pyplot as plot
 
-COVERAGE = 30
+COVERAGE = 20
 READ_LEN = 100
 ERR_ODDS = 100  # i.e. 1 in ERR_ODDS chance of error
 INDEL_ODDS = 1000
 BASES = ['A', 'C', 'G', 'T']
+
+TRAN_TAB = maketrans('ACGT', 'TGCA')
+
+
+def reverseComplement(seq):
+    return seq[::-1].translate(TRAN_TAB)
 
 
 def grouper(iterable, n, fillvalue=None):
@@ -18,29 +25,45 @@ def grouper(iterable, n, fillvalue=None):
 
 
 def createReads():
-    with open('/playpen/sgreens/fake/ref.fasta', 'r') as fp:
+    with open('/playpen/sgreens/ecoli/sequence.fasta', 'r') as fp:
         ref = ''.join(fp.read().split())  # remove newlines
-    with open('/playpen/sgreens/fake/reads.txt', 'w') as fp:
+    ref = ref[:100000]
+    with open('/playpen/sgreens/ecoli/EAS20_8/fake20.txt', 'w') as fp:
         for readNum in xrange((COVERAGE * len(ref)) / READ_LEN):
+        # for readNum in xrange(2000):
             start = randint(0, len(ref) - READ_LEN)
-            read = ref[start:start + READ_LEN]
-            qualString = ''
-            # add in errors
-            # for pos in xrange(READ_LEN):
-                # if randint(1, INDEL_ODDS) == 1:
-                #
-                # elif randint(1, ERR_ODDS) == 1:
-                #     newBase = choice(BASES)
-                #     while newBase == read[pos]:
-                #         newBase = choice(BASES)
-                #     read = read[:pos] + newBase + read[pos+1:]
-                #     qualString += '1'  # error
-                # else:
-                #     qualString += '0'  # not error
+            origRead = ref[start:start+READ_LEN]  # + ref[start+READ_LEN:start+READ_LEN+3].lower()
+            read = []
+            readPos = 0
+            refPos = 0
+            while readPos < READ_LEN:
+                if randint(1, INDEL_ODDS) == 1:
+                    length = randint(1, 3)
+                    if randint(0, 1):
+                        refPos += length
+                    else:
+                        for i in xrange(length):
+                            read.append(choice(BASES))
+                            readPos += 1
+                elif randint(1, ERR_ODDS) == 1:
+                    newBase = choice(BASES)
+                    while newBase == ref[start+refPos]:
+                        newBase = choice(BASES)
+                    read.append(newBase)
+                    refPos += 1
+                    readPos += 1
+                else:
+                    read.append(ref[start+refPos])
+                    refPos += 1
+                    readPos += 1
+            read = ''.join(read[:READ_LEN])
+            if randint(0, 1):
+                read = reverseComplement(read)
+                origRead = reverseComplement(origRead)
             fp.write('@' + str(readNum) + '\n')
             fp.write(read + '\n')
             fp.write('+\n')
-            fp.write(qualString + '\n')
+            fp.write(origRead + '\n')
 
 
 def measurePerformance():
@@ -72,110 +95,31 @@ def measurePerformance():
 
 
 def correction():
-    reads = {}
-    with open('/playpen/sgreens/fake/reads.txt', 'r') as fp:
-        for _, read, _, errString in grouper(fp, 4):
-            reads[read[:-1]] = errString
-    falsePos = 0
-    falseNeg = 0
-    truePos = 0
-    trueNeg = 0
-    missedErrPos = [0] * 100
-    foundErrPos = [0] * 100
-    errsInReadWhenMissed = [0] * 100
-    errsInRead = [0] * 100
+    fixed = 0
+    botched = 0
+    tried = 0
+    ignored = 0
     with open('/playpen/sgreens/fake/corrected2.fa', 'r') as fp:
-        for read, origRead, corrString in grouper(fp, 3):
-            oldfp = falsePos
-            errString = reads[origRead[:-1]][:-1]
-            corrString = corrString[:-1]
-            readErrs = errString.count('1')
-            errsInRead[readErrs] += 1
-            missedErr = False
-            for pos, (err, corr) in enumerate(izip_longest(errString, corrString)):
-                if err == '0':
-                    if corr == '0':
-                        trueNeg += 1
-                    else:
-                        falsePos += 1
+        for read, _, perfectRead, _, origRead in grouper(fp, 5):
+            if origRead == perfectRead:  # read had no error
+                if read == perfectRead:
+                    ignored += 1
                 else:
-                    if corr == '0':
-                        falseNeg += 1
-                        missedErrPos[pos] += 1
-                        missedErr = True
-                    else:
-                        truePos += 1
-                        foundErrPos[pos] += 1
-            # if falsePos > oldfp:
-            #     print origRead
-            #     print 'err ', errString
-            #     print 'corr', corrString
-            #     print 'orig', origRead
-            #     print 'new ', read
-            #     exit()
-            if missedErr:
-                print origRead[:-1]
-                print read[:-1]
-                print errString
-                print corrString
-                print
-                errsInReadWhenMissed[readErrs] += 1
-    print 'Corrected %.3f%% of errors' % ((100.*truePos) / (truePos + falseNeg))
-    print 'Corrected %.3f%% of non-errors' % ((100.*falsePos) / (trueNeg + falsePos))
-    plot.bar(range(100), missedErrPos)
-    plot.savefig('missed_err_pos.png')
-    plot.clf()
-    plot.bar(range(100), foundErrPos)
-    plot.savefig('found_err_pos.png')
-    plot.clf()
-    plot.bar(range(100), errsInRead)
-    plot.bar(range(100), errsInReadWhenMissed, color='r')
-    plot.savefig('errs_in_read.png')
-    print 'TP', truePos
-    print 'TN', trueNeg
-    print 'FP', falsePos
-    print 'FN', falseNeg
-
-
-def SGACorrection():
-    falsePos = 0
-    falseNeg = 0
-    truePos = 0
-    trueNeg = 0
-    origReads = {}
-    with open('/playpen/sgreens/fake/reads.txt', 'r') as fp:
-        for readID, read, _, _ in grouper(fp, 4):
-            readID = readID[:-1]
-            read = read[:-1]
-            origReads[readID] = read
-    with open('/playpen/sgreens/fake/reads.ec.fa', 'r') as fp:
-        for readID, read, _, errString in grouper(fp, 4):
-            readID = readID[:-1]
-            read = read[:-1]
-            errString = errString[:-1]
-            corrString = ['0' if a == b else '1' for a, b in izip_longest(origReads[readID], read)]
-            for pos, (err, corr) in enumerate(izip_longest(errString, corrString)):
-                if err == '0':
-                    if corr == '0':
-                        trueNeg += 1
-                    else:
-                        falsePos += 1
+                    botched += 1
+            else:  # read had error
+                if read == perfectRead:
+                    fixed += 1
                 else:
-                    if corr == '0':
-                        falseNeg += 1
-                    else:
-                        truePos += 1
-    # print 'falsePos', falsePos
-    # print 'falseNeg', falseNeg
-    # print 'truePos', truePos
-    # print 'trueNeg', trueNeg
-    print 'Corrected %.3f%% of errors' % ((100.*truePos) / (truePos + falseNeg))
-    print 'Corrected %.3f%% of non-errors' % ((100.*falsePos) / (trueNeg + falsePos))
+                    tried += 1
+    print 'Fixed', fixed, 'reads out of', fixed + tried, 'reads with errors: %.2f%%' % ((fixed*100.)/(fixed+tried))
+    print 'Ignored', ignored, 'reads out of', ignored + botched, 'reads without errors: %.2f%%' % ((ignored*100.)/(ignored+botched))
+    print 'Altered', fixed+botched, 'reads out of', fixed + botched + ignored + tried,\
+        'total reads: %.2f%%' % (((fixed+botched)*100.)/(fixed+botched+ignored+tried))
 
 
 def main():
-    correction()
-    # SGACorrection()
+    createReads()
+    # correction()
     # measurePerformance()
 
 
