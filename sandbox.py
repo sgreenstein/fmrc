@@ -1,6 +1,7 @@
 from MUSCython import MultiStringBWTCython as msbwt, LCPGen
 from logging import getLogger
 from time import clock
+import sys
 from itertools import izip, izip_longest
 import pysam
 from collections import Counter
@@ -16,7 +17,7 @@ from matplotlib import pyplot as plot
 # PATH = '/playpen/sgreens/fake/'
 # BWT_PATH = '/playpen/sgreens/fake/bwt/'
 PATH = '/playpen/sgreens/ecoli/msbwt20/'
-BWT_PATH = '/playpen/sgreens/ecoli/msbwt20/rle_bwt2/'
+BWT_PATH = '/playpen/sgreens/ecoli/msbwt20/rle_bwt/'
 
 
 K = 25
@@ -46,6 +47,7 @@ def superCorrect():
     corrected = np.empty(READ_LEN, dtype=np.uint8)
     with open(PATH + 'corrected2.fa', 'w') as fp:
         for readID in xrange(bwt.getSymbolCount(0)):
+        # for readID in xrange(10000):
             trusted.fill(0)
             corrString = ['0'] * READ_LEN
             origRead = bwt.recoverString(readID)
@@ -348,24 +350,25 @@ def compareQuals(fileName):
                 refPos += count
 
 
-def main():
-    # np.save('/playpen/sgreens/fake/bwt/lcps.npy', LCPGen.lcpGenerator(BWT_PATH, READ_LEN+1, getLogger()))
-    # cProfile.run('correct()')
-    # compareQuals('/playpen/sgreens/ecoli/uncorrected20.sam')
-    # correct()
-    # runLengthCorrect()
-    # superCorrect()
-    # print 'msbwt';
-    # summarizeBam('/playpen/sgreens/ecoli/msbwt20/msbwt.sam')
-    summarizeBam('/playpen/sgreens/ecoli/msbwt20/msbwt_s.sam')
-    # summarizeBam('/playpen/sgreens/ecoli/msbwtNoN20/msbwt.sam')
-    # summarizeBam('/playpen/sgreens/ecoli/sga20/sga.sam')
-    # print '\nsga';
-    # summarizeBam('/playpen/sgreens/ecoli/msbwt20/rl.sam')
-    # print '\nuncorrected';
-    # summarizeBam('/playpen/sgreens/ecoli/uncorrected20.sam')
-    # convertToFasta()
+def main(function):
+    if function == 'correct':
+        superCorrect()
+    else:
+        # np.save('/playpen/sgreens/fake/bwt/lcps.npy', LCPGen.lcpGenerator(BWT_PATH, READ_LEN+1, getLogger()))
+        # cProfile.run('correct()')
+        # compareQuals('/playpen/sgreens/ecoli/uncorrected20.sam')
+        # runLengthCorrect()
+        # print 'msbwt';
+        # summarizeBam('/playpen/sgreens/ecoli/msbwt20/msbwt.sam')
+        summarizeBam('/playpen/sgreens/ecoli/msbwt20/msbwt_s.sam')
+        # summarizeBam('/playpen/sgreens/ecoli/msbwtNoN20/msbwt.sam')
+        # summarizeBam('/playpen/sgreens/ecoli/sga20/sga.sam')
+        # print '\nsga';
+        # summarizeBam('/playpen/sgreens/ecoli/msbwt20/rl.sam')
+        # print '\nuncorrected';
+        # summarizeBam('/playpen/sgreens/ecoli/uncorrected20.sam')
+        # convertToFasta()
 
 
 if __name__ == '__main__':
-    main()
+    main(sys.argv[1:])
