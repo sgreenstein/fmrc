@@ -12,13 +12,7 @@ import matplotlib
 
 matplotlib.use('Agg')
 from matplotlib import pyplot as plot
-# cimport numpy as np
 
-# cdef int K = 19
-# cdef list BASES = ['A', 'C', 'G', 'T']
-# cdef int READ_LEN = 100
-# PATH = '/playpen/sgreens/ecoli/'
-# BWT_PATH = '/playpen/sgreens/ecoli/bwt/'
 # PATH = '/playpen/sgreens/fake/'
 # BWT_PATH = '/playpen/sgreens/fake/bwt/'
 PATH = '/playpen/sgreens/ecoli/msbwt20/'
@@ -45,146 +39,6 @@ def grouper(iterable, n, fillvalue=None):
     return izip_longest(fillvalue=fillvalue, *args)
 
 
-# @profile
-def correct():
-    begin = clock()
-    bwt = msbwt.loadBWT(BWT_PATH, True)
-    trusted = np.zeros(READ_LEN - K + 1, dtype=np.uint8)
-    print bwt.getSymbolCount(0), 'reads'
-    with open(PATH + 'corrected2.fa', 'w') as fp:
-        for readID in xrange(0, bwt.getSymbolCount(0)):
-        # for readID in xrange(0, 1000):
-            trusted.fill(0)
-            origRead = bwt.recoverString(readID)
-            read = list(origRead[1:])
-            changeMade = True
-            while changeMade:
-                changeMade = False
-                if read[-1] != 'N':
-                    lo, hi = bwt.findIndicesOfStr(''.join(read[-K:]))
-                    if hi - lo > HI_THRESH:
-                        trusted[-1] = True
-                    else:
-                        rcLo, rcHi = bwt.findIndicesOfStr(reverseComplement(''.join(read[-K:])))
-                        trusted[-1] = rcHi != rcLo and hi - lo + rcHi - rcLo > THRESH
-                for start, end in izip(xrange(READ_LEN - K - 1, -1, -1), xrange(READ_LEN - 1, K - 1, -1)):
-                    if not trusted[start]:
-                        if read[start] != 'N':
-                            query = ''.join(read[start:end])
-                            lo, hi = bwt.findIndicesOfStr(query)
-                            if hi - lo > HI_THRESH:
-                                trusted[start] = True
-                            else:
-                                rcLo, rcHi = bwt.findIndicesOfStr(reverseComplement(''.join(read[start:end])))
-                                trusted[start] = (rcHi != rcLo and hi - lo + rcHi - rcLo > THRESH)
-                        if not trusted[start] and trusted[start + 1]:
-                            # first base of k-mer is error
-                            bestSupport = 0
-                            lo, hi = bwt.findIndicesOfStr(''.join(read[start + 1:end]))
-                            for newBase in BASES:
-                                newLo = bwt.getOccurrenceOfCharAtIndex(BASE_TO_NUM[newBase], lo)
-                                newHi = bwt.getOccurrenceOfCharAtIndex(BASE_TO_NUM[newBase], hi)
-                                rcLo, rcHi = bwt.findIndicesOfStr(
-                                    reverseComplement(newBase + ''.join(read[start + 1:end])))
-                                if newHi - newLo + rcHi - rcLo > bestSupport:
-                                    bestSupport = newHi - newLo + rcHi - rcLo
-                                    if read[start] != newBase:
-                                        changeMade = True
-                                    read[start] = newBase
-                                    trusted[start] = bestSupport > THRESH
-                        elif trusted[start] and not trusted[start + 1]:
-                            # base following this k-mer is error
-                            bestSupport = 0
-                            rcLo, rcHi = bwt.findIndicesOfStr(reverseComplement(''.join(read[start + 1:end])))
-                            for newBase in BASES:
-                                newLo = bwt.getOccurrenceOfCharAtIndex(BASE_TO_NUM[reverseComplement(newBase)], rcLo)
-                                newHi = bwt.getOccurrenceOfCharAtIndex(BASE_TO_NUM[reverseComplement(newBase)], rcHi)
-                                lo, hi = bwt.findIndicesOfStr(''.join(read[start + 1:end]) + newBase)
-                                if newHi - newLo + hi - lo > bestSupport:
-                                    bestSupport = newHi - newLo + hi - lo
-                                    if read[end] != newBase:
-                                        changeMade = True
-                                    read[end] = newBase
-            fp.write('>' + str(readID) + '\n')
-            fp.write(''.join(read) + '\n')
-    print 'Took', clock() - begin, 'seconds'
-
-
-def lcpCorrect():
-    begin = clock()
-    bwt = msbwt.loadBWT(BWT_PATH, True)
-    trusted = np.zeros(READ_LEN - K + 1, dtype=np.uint8)
-    changed = np.empty(READ_LEN, dtype=np.uint8)
-    trustedIndices = np.load(BWT_PATH + 'trustedIndices.npy')
-    print bwt.getSymbolCount(0), 'reads'
-    with open(PATH + 'corrected2.fa', 'w') as fp:
-        # for readID in xrange(readsPerWorker * workerNum, min(readsPerWorker * (workerNum+1), bwt.getSymbolCount(0))):
-        for readID in xrange(bwt.getSymbolCount(0)):
-            trusted.fill(0)
-            changed.fill(0)
-            origRead, indices = bwt.recoverString(readID, True)
-            read = list(origRead[1:])
-            changeMade = True
-            while changeMade:
-                changeMade = False
-                if read[-1] != 'N':  # untrusted if k-mer starts with an N
-                    # if this k-mer is unchanged, see if high thresh is met
-                    if True not in changed[READ_LEN - K:] and trustedIndices[indices[READ_LEN - K + 1]]:
-                        trusted[-1] = True
-                    else:  # k-mer is either changed or didn't meet high thresh
-                        lo, hi = bwt.findIndicesOfStr(''.join(read[-K:]))
-                        if hi - lo > HI_THRESH:
-                            trusted[-1] = True
-                        else:
-                            rcLo, rcHi = bwt.findIndicesOfStr(reverseComplement(''.join(read[-K:])))
-                            trusted[-1] = rcHi != rcLo and hi - lo + rcHi - rcLo > THRESH
-                for start, end in izip(xrange(READ_LEN - K - 1, -1, -1), xrange(READ_LEN - 1, K - 1, -1)):
-                    if not trusted[start]:
-                        if read[start] != 'N':
-                            if True not in changed[start:end] and trustedIndices[indices[start + 1]]:
-                                trusted[start] = True
-                            else:
-                                lo, hi = bwt.findIndicesOfStr(''.join(read[start:end]))
-                                if hi - lo > HI_THRESH:
-                                    trusted[start] = True
-                                else:
-                                    rcLo, rcHi = bwt.findIndicesOfStr(reverseComplement(''.join(read[start:end])))
-                                    trusted[start] = (rcHi != rcLo and hi - lo + rcHi - rcLo > THRESH)
-                        if not trusted[start] and trusted[start + 1]:
-                            # first base of k-mer is error
-                            bestSupport = 0
-                            lo, hi = bwt.findIndicesOfStr(''.join(read[start + 1:end]))
-                            for newBase in BASES:
-                                newLo = bwt.getOccurrenceOfCharAtIndex(BASE_TO_NUM[newBase], lo)
-                                newHi = bwt.getOccurrenceOfCharAtIndex(BASE_TO_NUM[newBase], hi)
-                                rcLo, rcHi = bwt.findIndicesOfStr(
-                                    reverseComplement(newBase + ''.join(read[start + 1:end])))
-                                if newHi - newLo + rcHi - rcLo > bestSupport:
-                                    bestSupport = newHi - newLo + rcHi - rcLo
-                                    if read[start] != newBase:
-                                        changeMade = True
-                                        changed[start] = True
-                                    read[start] = newBase
-                                    trusted[start] = bestSupport > THRESH
-                        elif trusted[start] and not trusted[start + 1]:
-                            # base following this k-mer is error
-                            bestSupport = 0
-                            rcLo, rcHi = bwt.findIndicesOfStr(reverseComplement(''.join(read[start + 1:end])))
-                            for newBase in BASES:
-                                newLo = bwt.getOccurrenceOfCharAtIndex(BASE_TO_NUM[reverseComplement(newBase)], rcLo)
-                                newHi = bwt.getOccurrenceOfCharAtIndex(BASE_TO_NUM[reverseComplement(newBase)], rcHi)
-                                lo, hi = bwt.findIndicesOfStr(''.join(read[start + 1:end]) + newBase)
-                                if newHi - newLo + hi - lo > bestSupport:
-                                    bestSupport = newHi - newLo + hi - lo
-                                    if read[end] != newBase:
-                                        changeMade = True
-                                        changed[end] = True
-                                    read[end] = newBase
-            fp.write('>' + str(readID) + '\n')
-            fp.write(''.join(read) + '\n')
-    print 'Took', clock() - begin, 'seconds'
-
-
 def superCorrect():
     begin = clock()
     bwt = msbwt.loadBWT(BWT_PATH, False)
@@ -196,7 +50,7 @@ def superCorrect():
             corrString = ['0'] * READ_LEN
             origRead = bwt.recoverString(readID)
             origRead = origRead[1:] + '\n'
-            origRead = 'CGGTCGCGCTATACTTTAGATGCCCAGGTCGCTGCATCATGGGTAATGAAGAATAAGGCTGGATAAAGCGACGTTGTGTACCGTCACTTTCTTCAATCGT\n'
+            # origRead = 'CGGTCGCGCTATACTTTAGATGCCCAGGTCGCTGCATCATGGGTAATGAAGAATAAGGCTGGATAAAGCGACGTTGTGTACCGTCACTTTCTTCAATCGT\n'
             read = list(origRead[:-1])
             revCounts, _ = bwt.countStrandedSeqMatches(reverseComplement(origRead[:-1]), K)
             revCounts = np.flipud(revCounts)
@@ -257,8 +111,6 @@ def superCorrect():
                                             reverseComplement(''.join(read[kmersStart:i+K])), K)
                                         newCounts = np.flipud(newCounts)
                                         trusted[kmersStart:i+1] |= newCounts > 0
-            print ''.join(read)
-            exit()
             fp.write(''.join(read) + '\n')
             fp.write(origRead)
             fp.write(''.join(corrString) + '\n')
@@ -324,73 +176,6 @@ def runLengthCorrect():
     print 'Took', clock() - begin, 'seconds'
 
 
-def correctKmer(bwt, read):
-    for i in xrange(0, K):
-        for newBase in BASES:
-            newLo, newHi = bwt.findIndicesOfStr(''.join(read[:i] + [newBase] + read[i + 1:]))
-            if newHi - newLo > THRESH:
-                return newBase, i
-    return None, None
-
-
-def bruteForceCorrect(path=PATH):
-    begin = clock()
-    bwt = msbwt.loadBWT(BWT_PATH, False)
-    trustedIndices = np.load(BWT_PATH + 'trustedIndices.npy')
-    print bwt.getSymbolCount(0), 'reads'
-    with open(path + 'corrected2.fasta', 'w') as fp:
-        for readID in xrange(bwt.getSymbolCount(0)):
-            # for readID in xrange(1000):
-            trusted = [0] * (READ_LEN - K + 1)
-            changed = [False] * READ_LEN
-            # origRead = bwt.recoverString(readID)[1:]
-            origRead, indices = bwt.recoverString(readID, True)
-            origRead = origRead[1:]
-            # indices = indices[1:]
-            read = list(origRead)
-            corrString = ['0'] * READ_LEN
-            isChanging = True
-            while isChanging:
-                isChanging = False
-                for start, end in izip(xrange(READ_LEN - K, -1, -1), xrange(READ_LEN, K - 1, -1)):
-                    if not trusted[start]:
-                        if True not in changed[start:end]:
-                            trusted[start] = trustedIndices[indices[start + 1]]
-                        else:
-                            lo, hi = bwt.findIndicesOfStr(''.join(read[start:end]))
-                            trusted[start] = (hi - lo > THRESH)
-                        if not trusted[start]:
-                            newBase, pos = correctKmer(bwt, read[start:end])
-                            if newBase:
-                                pos += start
-                                read[pos] = newBase
-                                corrString[pos] = '1'
-                                changed[pos] = True
-                                trusted[start] = 1
-                                isChanging = True
-            fp.write(''.join(read) + '\n')
-            fp.write(origRead + '\n')
-            fp.write(''.join(corrString) + '\n')
-    print 'Took', clock() - begin, 'seconds'
-    print path
-
-
-def findTrustedIndices():
-    begin = clock()
-    lcps = np.load(BWT_PATH + 'lcp.npy')
-    # lcps = [randint(1, 60) for _ in xrange(100)]
-    trustedIndices = np.empty(len(lcps), dtype=np.uint8)
-    blockStart = 0
-    for i, lcp in enumerate(lcps, 1):
-        if lcp < K:
-            trustedIndices[blockStart:i] = i - blockStart > THRESH
-            blockStart = i
-    # for i in xrange(100):
-    # print lcps[i], trustedIndices[i]
-    np.save(BWT_PATH + 'trustedIndices.npy', trustedIndices)
-    print 'findTrustedIndices:', clock() - begin, 'seconds'
-
-
 def samplePaired():
     coverage = 20
     numReads = 28428648
@@ -441,30 +226,7 @@ def countsOfSeq(bwt, seq, k=K):
     return ''.join(ca)
 
 
-def pseudoRef(fileName):
-    samfile = pysam.Samfile(fileName, 'rb')
-    lineLength = 70
-    with open('/playpen/sgreens/ecoli/sequence.fasta', 'r') as fp:
-        rawRef = fp.read().split('\n')[1:]
-        # ref = ''.join(fp.read().split('\n')[1:])
-    for col in samfile.pileup():
-        c = Counter()
-        for read in col.pileups:
-            if read.query_position:
-                c[read.alignment.seq[read.query_position]] += 1
-        lineNum = col.reference_pos / lineLength
-        linePos = col.reference_pos % lineLength
-        line = rawRef[lineNum]
-        try:
-            rawRef[lineNum] = line[:linePos] + c.most_common(1)[0][0] + line[linePos + 1:]
-        except IndexError:
-            pass
-    with open('/playpen/sgreens/ecoli/pseudoRef.fasta', 'w') as fp:
-        for line in rawRef:
-            fp.write(line + '\n')
-
-
-def summarizeBam(fileName):
+def summarizeBam(fileName, debug=False):
     MATCH = 0
     DEL = 2
     INS = 1
@@ -503,7 +265,7 @@ def summarizeBam(fileName):
                 readPos += count
             if op != INS and op != SOFT_CLIP:
                 refPos += count
-                if '1' in mismatches:
+                if debug and '1' in mismatches:
                     if read.is_reverse:
                         print read.qname, 'rc'
                         print reverseComplement(ref[read.pos:read.pos+READ_LEN])
@@ -584,16 +346,6 @@ def compareQuals(fileName):
                 readPos += count
             if op != INS and op != SOFT_CLIP:
                 refPos += count
-
-
-def convertToFasta():
-    readNum = 0
-    with open('/playpen/sgreens/ecoli/corrected_combined_old.fa', 'r') as inFile:
-        with open('/playpen/sgreens/ecoli/corrected_combined.fa', 'w') as outFile:
-            for line in inFile:
-                outFile.write('>' + str(readNum) + '\n')
-                outFile.write(line)
-                readNum += 1
 
 
 def main():
