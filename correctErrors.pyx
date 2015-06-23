@@ -75,50 +75,35 @@ def correct(inFastqFile, bwtDir, k, hiThresh, numProcesses, processNum):
                                     for base in BASES:
                                         rcLo = bwt.getOccurrenceOfCharAtIndex(BASE_NUMS[base.translate(TRAN_TAB)], newLo)
                                         rcHi = bwt.getOccurrenceOfCharAtIndex(BASE_NUMS[base.translate(TRAN_TAB)], newHi)
+                                        lo, hi = bwt.findIndicesOfStr(''.join(read[i+1:i+k]) + base)
                                         # rcLo, rcHi = bwt.findIndicesOfStr(reverseComplement(''.join(read[i+1:i+k]) + base))
-                                        # if hi - lo + rcHi - rcLo > bestSupport:
-                                        if rcHi - rcLo > bestSupport:
-                                            bestSupport = rcHi - rcLo
-                                            # bestSupport = hi - lo + rcHi - rcLo
+                                        if hi - lo + rcHi - rcLo > bestSupport:
+                                            bestSupport = hi - lo + rcHi - rcLo
                                             bestBase = base
-                                    if bestSupport == 0:  #TODO: do this query more often (during ties?)
-                                        for base in BASES:
-                                            lo, hi = bwt.findIndicesOfStr(''.join(read[i+1:i+k]) + base)
-                                            if hi - lo > bestSupport:
-                                                bestSupport = hi - lo
-                                                bestBase = base
                                     if bestBase != read[i+k]:
                                         changeMade = True
                                         corrected[i+k] = True
                                         read[i+k] = bestBase
                                     if corrected[i+k]:
                                         kmersEnd = min(len(read), i+2*k)
-                                        # newCounts, _ = bwt.countStrandedSeqMatches(''.join(read[i+1:kmersEnd]), k)
                                         newCounts, _ = bwt.countStrandedSeqMatches(
                                             reverseComplement(''.join(read[i+1:kmersEnd])), k)
                                         newCounts = np.flipud(newCounts)
                                         trusted[i+1:kmersEnd-k+1] = newCounts > 0
                                         if False in trusted[i+1:kmersEnd-k+1]:
+                                            newCounts, _ = bwt.countStrandedSeqMatches(''.join(read[i+1:kmersEnd]), k)
                                             trusted[i+1:kmersEnd-k+1] |= newCounts > hiThresh
-                                            counts[i+1:kmersEnd-k+1] = newCounts
                             elif trusted[i+1] and not corrected[i]:  # err at read[i]
                                 bestSupport = 0
                                 newLo, newHi = bwt.findIndicesOfStr(''.join(read[i+1:i+k]))
                                 for base in BASES:
                                     lo = bwt.getOccurrenceOfCharAtIndex(BASE_NUMS[base], newLo)
-                                    hi = bwt.getOccurrenceOfCharAtIndex(BASE_NUMS[base], newLo)
+                                    hi = bwt.getOccurrenceOfCharAtIndex(BASE_NUMS[base], newHi)
                                     # lo, hi = bwt.findIndicesOfStr(base + ''.join(read[i+1:i+k]))
-                                    # if hi - lo + rcHi - rcLo > bestSupport:
-                                    if hi - lo > bestSupport:
-                                        bestSupport = hi - lo
-                                        # bestSupport = hi - lo + rcHi - rcLo
+                                    rcLo, rcHi = bwt.findIndicesOfStr(reverseComplement(base + ''.join(read[i+1:i+k])))
+                                    if hi - lo + rcHi - rcLo > bestSupport:
+                                        bestSupport = hi - lo + rcHi - rcLo
                                         bestBase = base
-                                if bestSupport == 0:
-                                    for base in BASES:
-                                        rcLo, rcHi = bwt.findIndicesOfStr(reverseComplement(base + ''.join(read[i+1:i+k])))
-                                        if rcHi - rcLo > bestSupport:
-                                            bestSupport = rcHi - rcLo
-                                            bestBase = base
                                 if bestBase != read[i]:
                                     changeMade = True
                                     corrected[i] = True
@@ -129,7 +114,6 @@ def correct(inFastqFile, bwtDir, k, hiThresh, numProcesses, processNum):
                                         reverseComplement(''.join(read[kmersStart:i+k])), k)
                                     newCounts = np.flipud(newCounts)
                                     trusted[kmersStart:i+1] = newCounts > 0
-                                    # counts[kmersStart:i+1] = newCounts
                                     if False in trusted[kmersStart:i+1]:
                                         newCounts, _ = bwt.countStrandedSeqMatches(''.join(read[kmersStart:i+k]), k)
                                         trusted[kmersStart:i+1] |= newCounts > hiThresh
@@ -144,6 +128,8 @@ def correct(inFastqFile, bwtDir, k, hiThresh, numProcesses, processNum):
 def willBeMain(inFilename, bwtDir, k=25, hiThresh=5, outFilename='corrected.fastq', numProcesses=1):
     logging.basicConfig(level=logging.DEBUG)
     begin = clock()
+    # correct(inFilename, bwtDir, k, hiThresh, 1, 0)
+    # exit()
     pool = Pool(numProcesses)
     mapFunc = partial(correct, inFilename, bwtDir, k, hiThresh, numProcesses)
     fastqs = pool.map(mapFunc, range(numProcesses))
