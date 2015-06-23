@@ -194,7 +194,7 @@ def samplePaired():
 
 
 def sample():
-    coverage = 30
+    coverage = 40
     numReads = 28428648
     refLength = 4641652
     randReads = [randint(0, numReads - 1) for _ in xrange((coverage * refLength) / READ_LEN)]
@@ -214,6 +214,28 @@ def sample():
             reads = inFile.read().split('\n')
             for i in [j - (numReads / 2) for j in randReads2]:
                 outFile.writelines([line + '\n' for line in reads[i * 4:4 * (i + 1)]])
+
+
+def sampleFromInterleaved():
+    coverage = 10
+    numReads = 71945982
+    refLength = 100286401
+    randReads = [randint(0, numReads - 1) for _ in xrange((coverage * refLength) / READ_LEN)]
+    print len(randReads), 'reads'
+    randReads.sort()
+    with open('/playpen/sgreens/fq_celegans/cov' + str(coverage) + '.txt', 'w') as outFile,\
+            open('/playpen/sgreens/fq_celegans/srr065388.fastq', 'r') as inFile:
+        for i in xrange(randReads[0]):
+            for j in xrange(4):
+                inFile.readline()
+        for j in xrange(4):
+            outFile.write(inFile.readline())
+        for read, prevRead in izip(randReads[1:], randReads):
+            for i in xrange(prevRead, read-1):
+                for j in xrange(4):
+                    inFile.readline()
+            for j in xrange(4):
+                outFile.write(inFile.readline())
 
 
 def countsOfSeq(bwt, seq, k=K):
@@ -361,8 +383,13 @@ def main(function):
         # print 'msbwt';
         # summarizeBam('/playpen/sgreens/ecoli/msbwt20/msbwt.sam')
         summarizeBam('/playpen/sgreens/ecoli/msbwt20/msbwt_s.sam')
+        # sampleFromInterleaved()
         # summarizeBam('/playpen/sgreens/ecoli/msbwtNoN20/msbwt.sam')
         # summarizeBam('/playpen/sgreens/ecoli/sga20/sga.sam')
+        # for i in xrange(19, 30, 2):
+        #     print 'k =', i
+        #     summarizeBam('/playpen/sgreens/ecoli/sga20/k' + str(i) + '.sam')
+        #     print
         # print '\nsga';
         # summarizeBam('/playpen/sgreens/ecoli/msbwt20/rl.sam')
         # print '\nuncorrected';
