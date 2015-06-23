@@ -254,6 +254,38 @@ def countsOfSeq(bwt, seq, k=K):
     return ''.join(ca)
 
 
+def toBamFile(samFile):
+    bamFile = samFile[:-3]+'bam'
+    sortedBamFile = samFile[:-3] + 'sorted.bam'
+    if not os.path.isfile(sortedBamFile):
+        with open(bamFile, 'w+') as fp:
+            call(['samtools', 'view', '-Sb', samFile], stdout=fp)
+        call(['samtools', 'sort', bamFile, sortedBamFile[:-4]])
+        call(['samtools', 'index', sortedBamFile])
+    return sortedBamFile
+
+
+def errsFromPileup(samFile):
+    sam = pysam.Samfile(toBamFile(samFile), 'rb')
+    errs = 0
+    snps = 0
+    snpFreqs = Counter()
+    for col in sam.pileup():
+        bases = Counter()
+        for read in col.pileups:
+            if not read.is_del and not read.is_refskip:
+                bases[read.alignment.query_sequence[read.query_position]] += 1
+        for base, freq in bases.most_common(5)[1:]:
+            if freq < 2:
+                errs += 1
+            else:
+                snps += 1
+                snpFreqs[freq] += 1
+    for freq, count in snpFreqs.iteritems():
+        print 'Support', freq, ':', count
+    return errs, snps
+
+
 def summarizeBam(samFile, refPath, debug=False):
     MATCH = 0
     DEL = 2
@@ -274,14 +306,7 @@ def summarizeBam(samFile, refPath, debug=False):
                 chromInfo = line.split()
                 # get chromo name, length, offset in file
                 chroms.append((chromInfo[0], int(chromInfo[1]), int(chromInfo[2]), int(chromInfo[3])))
-        bamFile = samFile[:-3]+'bam'
-        sortedBamFile = samFile[:-3] + 'sorted.bam'
-        if not os.path.isfile(sortedBamFile):
-            with open(bamFile, 'w+') as fp:
-                call(['samtools', 'view', '-Sb', samFile], stdout=fp)
-            call(['samtools', 'sort', bamFile, sortedBamFile[:-4]])
-            call(['samtools', 'index', sortedBamFile])
-        sam = pysam.Samfile(sortedBamFile, 'rb')
+        sam = pysam.Samfile(toBamFile(samFile), 'rb')
     else:
         chroms = [(None, None, None, None)]
         sam = pysam.Samfile(samFile, 'r')
@@ -338,14 +363,21 @@ def summarizeBam(samFile, refPath, debug=False):
                             print countsOfSeq(bwt, read.seq, 25)
                             print countsOfSeq(bwt, reverseComplement(read.seq), 25)[::-1]
                         print
+    # pileupErrs, snps = errsFromPileup(samFile)
+    pileupErrs = snps = 1
+    print samFile[samFile.rfind('/')+1:]
     print bases, 'bases'
     print alignedBases, 'aligned bases'
     print errs, 'errors'
+    print pileupErrs, 'errors according to pileup'
+    print snps, 'SNPs'
     print 'Error rate 1 per', bases / errs, 'bases'
+    print 'Pileup error rate 1 per', bases / pileupErrs, 'bases'
     print perfect, 'perfect reads'
     print errTypes[0], 'Mismatches'
     print errTypes[1], 'Insertions'
     print errTypes[2], 'Deletions'
+    print
 
 
 def compareQuals(fileName):
@@ -413,11 +445,12 @@ def main(function):
         # runLengthCorrect()
         # print 'msbwt';
         # summarizeBam('/playpen/sgreens/ecoli/msbwt20/msbwt.sam')
-        # summarizeBam('/playpen/sgreens/ecoli/msbwt20/msbwt_s.sam')
+        # summarizeBam('/playpen/sgreens/ecoli/msbwt20/msbwt_s.sam', ecoli)
         # sampleFromInterleaved()
-        summarizeBam('/playpen/sgreens/fq_celegans/sga/sga.sam', celegans)
-        summarizeBam('/playpen/sgreens/fq_celegans/uncorrected.sam', celegans)
-        # summarizeBam('/playpen/sgreens/ecoli/sga20/sga.sam')
+        # summarizeBam('/playpen/sgreens/fq_celegans/sga/sga.sam', celegans)
+        # summarizeBam('/playpen/sgreens/fq_celegans/msbwt/msbwt.sam', celegans)
+        # summarizeBam('/playpen/sgreens/fq_celegans/uncorrected.sam', celegans)
+        summarizeBam('/playpen/sgreens/ecoli/sga20/k12x6.sam', ecoli)
         # for i in xrange(19, 30, 2):
         #     print 'k =', i
         #     summarizeBam('/playpen/sgreens/ecoli/sga20/k' + str(i) + '.sam')
@@ -425,7 +458,7 @@ def main(function):
         # print '\nsga';
         # summarizeBam('/playpen/sgreens/ecoli/msbwt20/rl.sam')
         # print '\nuncorrected';
-        # summarizeBam('/playpen/sgreens/ecoli/uncorrected20.sam')
+        # summarizeBam('/playpen/sgreens/ecoli/uncorrected20.sam', ecoli)
         # convertToFasta()
 
 
