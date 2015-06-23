@@ -1,5 +1,7 @@
 from MUSCython import MultiStringBWTCython as msbwt, LCPGen
 from logging import getLogger
+import os
+from subprocess import call
 from time import clock
 import sys
 from itertools import izip, izip_longest
@@ -16,8 +18,10 @@ from matplotlib import pyplot as plot
 
 # PATH = '/playpen/sgreens/fake/'
 # BWT_PATH = '/playpen/sgreens/fake/bwt/'
-PATH = '/playpen/sgreens/ecoli/msbwt20/'
-BWT_PATH = '/playpen/sgreens/ecoli/msbwt20/rle_bwt/'
+# PATH = '/playpen/sgreens/ecoli/msbwt20/'
+# BWT_PATH = '/playpen/sgreens/ecoli/msbwt20/rle_bwt/'
+PATH = '/playpen/sgreens/fq_celegans/msbwt/'
+BWT_PATH = '/playpen/sgreens/ecoli/msbwt20/bwt/'
 
 
 K = 25
@@ -250,65 +254,90 @@ def countsOfSeq(bwt, seq, k=K):
     return ''.join(ca)
 
 
-def summarizeBam(fileName, debug=False):
+def summarizeBam(samFile, refPath, debug=False):
     MATCH = 0
     DEL = 2
     INS = 1
     SOFT_CLIP = 4
     HARD_CLIP = 5
-    samfile = pysam.Samfile(fileName, 'r')
     errs = 0
     bases = 0
     alignedBases = 0
     perfect = 0
     errTypes = [0, 0, 0]
-    with open('/playpen/sgreens/ecoli/sequence.fasta', 'r') as fp:
-        # with open('/playpen/sgreens/ecoli/pseudoRef.fasta', 'r') as fp:
-        ref = ''.join(fp.read().split('\n')[1:])
-    bwt = msbwt.loadBWT(BWT_PATH)
-    for read in samfile.fetch():
-        bases += READ_LEN
-        refPos = read.pos
-        readPos = 0
-        mismatches = ['0'] * READ_LEN
-        for op, count in read.cigar:
-            if op != MATCH and op != SOFT_CLIP and op != HARD_CLIP:
-                errs += 1
-                errTypes[op] += 1
-            elif op == MATCH:
-                alignedBases += count
-                if read.seq[readPos:readPos + count] != ref[refPos:refPos + count]:
-                    for errPos, (a, b) in enumerate(zip(read.seq[readPos:readPos + count], ref[refPos:refPos + count])):
-                        if a != b:
-                            errs += 1
-                            errTypes[MATCH] += 1
-                            mismatches[readPos + errPos] = '1'
-                elif len(read.cigar) == 1:
-                    perfect += 1
-            if op != DEL:
-                readPos += count
-            if op != INS and op != SOFT_CLIP:
-                refPos += count
-                if debug and '1' in mismatches:
-                    if read.is_reverse:
-                        print read.qname, 'rc'
-                        print reverseComplement(ref[read.pos:read.pos+READ_LEN])
-                        print reverseComplement(read.seq)
-                        print ''.join(mismatches)[::-1]
-                        # print countsOfSeq(bwt, reverseComplement(read.seq))
-                        # print countsOfSeq(bwt, read.seq)[::-1]
-                        print countsOfSeq(bwt, reverseComplement(read.seq), 25)
-                        print countsOfSeq(bwt, read.seq, 25)[::-1]
-                    else:
-                        print read.qname
-                        print ref[read.pos:read.pos+READ_LEN]
-                        print read.seq
-                        print ''.join(mismatches)
-                        # print countsOfSeq(bwt, read.seq)
-                        # print countsOfSeq(bwt, reverseComplement(read.seq))[::-1]
-                        print countsOfSeq(bwt, read.seq, 25)
-                        print countsOfSeq(bwt, reverseComplement(read.seq), 25)[::-1]
-                    print
+    chroms = []
+    if debug:
+        bwt = msbwt.loadBWT(BWT_PATH)
+    if os.path.isfile(refPath + '.fai'):
+        with open(refPath + '.fai', 'r') as fp:
+            for line in fp:
+                chromInfo = line.split()
+                # get chromo name, length, offset in file
+                chroms.append((chromInfo[0], int(chromInfo[1]), int(chromInfo[2]), int(chromInfo[3])))
+        bamFile = samFile[:-3]+'bam'
+        sortedBamFile = samFile[:-3] + 'sorted.bam'
+        if not os.path.isfile(sortedBamFile):
+            with open(bamFile, 'w+') as fp:
+                call(['samtools', 'view', '-Sb', samFile], stdout=fp)
+            call(['samtools', 'sort', bamFile, sortedBamFile[:-4]])
+            call(['samtools', 'index', sortedBamFile])
+        sam = pysam.Samfile(sortedBamFile, 'rb')
+    else:
+        chroms = [(None, None, None, None)]
+        sam = pysam.Samfile(samFile, 'r')
+    for chromoName, length, offset, lineLen in chroms:
+        with open(refPath) as fp:
+            if chromoName is not None:
+                bytesNeeded = length + (length / lineLen)  # num bases + num line breaks
+                fp.seek(offset, 0)
+                ref = ''.join(fp.read(bytesNeeded).split('\n'))
+                reads = sam.fetch(chromoName)
+            else:
+                ref = ''.join(fp.read().split('\n')[1:])
+                reads = sam.fetch()
+        for read in reads:
+            bases += READ_LEN
+            refPos = read.pos
+            readPos = 0
+            mismatches = ['0'] * READ_LEN
+            for op, count in read.cigar:
+                if op != MATCH and op != SOFT_CLIP and op != HARD_CLIP:
+                    errs += 1
+                    errTypes[op] += 1
+                elif op == MATCH:
+                    alignedBases += count
+                    if read.seq[readPos:readPos + count] != ref[refPos:refPos + count]:
+                        for errPos, (a, b) in enumerate(zip(read.seq[readPos:readPos + count], ref[refPos:refPos + count])):
+                            if a != b:
+                                errs += 1
+                                errTypes[MATCH] += 1
+                                mismatches[readPos + errPos] = '1'
+                    elif len(read.cigar) == 1:
+                        perfect += 1
+                if op != DEL:
+                    readPos += count
+                if op != INS and op != SOFT_CLIP:
+                    refPos += count
+                    if debug and '1' in mismatches:
+                        if read.is_reverse:
+                            print read.qname, 'rc'
+                            print reverseComplement(ref[read.pos:read.pos+READ_LEN])
+                            print reverseComplement(read.seq)
+                            print ''.join(mismatches)[::-1]
+                            # print countsOfSeq(bwt, reverseComplement(read.seq))
+                            # print countsOfSeq(bwt, read.seq)[::-1]
+                            print countsOfSeq(bwt, reverseComplement(read.seq), 25)
+                            print countsOfSeq(bwt, read.seq, 25)[::-1]
+                        else:
+                            print read.qname
+                            print ref[read.pos:read.pos+READ_LEN]
+                            print read.seq
+                            print ''.join(mismatches)
+                            # print countsOfSeq(bwt, read.seq)
+                            # print countsOfSeq(bwt, reverseComplement(read.seq))[::-1]
+                            print countsOfSeq(bwt, read.seq, 25)
+                            print countsOfSeq(bwt, reverseComplement(read.seq), 25)[::-1]
+                        print
     print bases, 'bases'
     print alignedBases, 'aligned bases'
     print errs, 'errors'
@@ -373,6 +402,8 @@ def compareQuals(fileName):
 
 
 def main(function):
+    celegans = '/playpen/sgreens/fq_celegans/c_elegans.PRJNA13758.WS241.genomic.fa'
+    ecoli = '/playpen/sgreens/ecoli/sequence.fasta'
     if function == 'correct':
         superCorrect()
     else:
@@ -382,9 +413,10 @@ def main(function):
         # runLengthCorrect()
         # print 'msbwt';
         # summarizeBam('/playpen/sgreens/ecoli/msbwt20/msbwt.sam')
-        summarizeBam('/playpen/sgreens/ecoli/msbwt20/msbwt_s.sam')
+        # summarizeBam('/playpen/sgreens/ecoli/msbwt20/msbwt_s.sam')
         # sampleFromInterleaved()
-        # summarizeBam('/playpen/sgreens/ecoli/msbwtNoN20/msbwt.sam')
+        summarizeBam('/playpen/sgreens/fq_celegans/sga/sga.sam', celegans)
+        summarizeBam('/playpen/sgreens/fq_celegans/uncorrected.sam', celegans)
         # summarizeBam('/playpen/sgreens/ecoli/sga20/sga.sam')
         # for i in xrange(19, 30, 2):
         #     print 'k =', i
