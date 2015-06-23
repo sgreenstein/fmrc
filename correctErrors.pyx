@@ -3,7 +3,7 @@ from time import clock
 from tempfile import NamedTemporaryFile
 import logging
 from multiprocessing import Pool
-from os import remove
+from os import remove, path
 from string import maketrans
 from functools import partial
 import cython
@@ -54,14 +54,18 @@ def correct(inFastqFile, bwtDir, k, hiThresh, numProcesses, processNum):
                             min(readsPerProcess * (processNum+1), bwt.getSymbolCount(0))):
             read = list(origRead[:-1])
             revCounts, _ = bwt.countStrandedSeqMatches(reverseComplement(origRead[:-1]), k)
+            # if revCounts  != bwt.countStrandedSeqMatchesNoOther(reverseComplement(origRead[:-1]), k):
+            #     print 'Not the same'
             revCounts = np.flipud(revCounts)
             trusted = (revCounts > 0).astype(np.uint8)
             corrected = np.zeros(len(read), dtype=np.uint8)
             readsDone += 1
-            if not readsDone & 1023:
-                logging.debug('Finished %d reads', readsDone)
+            # if not readsDone & 1023:
+            #     logging.debug('Finished %d reads', readsDone)
             if False in trusted:
                 counts, _ = bwt.countStrandedSeqMatches(origRead[:-1], k)
+                # if counts != bwt.countStrandedSeqMatchesNoOther(origRead[:-1], k):
+                #     print 'Not the same'
                 trusted |= counts > hiThresh
                 changeMade = True
                 while changeMade:
@@ -125,7 +129,9 @@ def correct(inFastqFile, bwtDir, k, hiThresh, numProcesses, processNum):
     return tmpFile.name
 
 
-def willBeMain(inFilename, bwtDir, k=25, hiThresh=5, outFilename='corrected.fastq', numProcesses=1):
+def willBeMain(inFilename, bwtDir, maxReadLen, k=25, hiThresh=5, outFilename='corrected.fastq', numProcesses=1):
+    if not path.isfile(bwtDir+'lcps.npy'):
+        buildLCP(bwtDir, maxReadLen)
     logging.basicConfig(level=logging.DEBUG)
     begin = clock()
     # correct(inFilename, bwtDir, k, hiThresh, 1, 0)
@@ -144,6 +150,18 @@ def willBeMain(inFilename, bwtDir, k=25, hiThresh=5, outFilename='corrected.fast
     logging.info('Corrected reads saved in %s', outFilename)
 
 
+def buildLCP(bwtDir, maxReadLen):
+    logging.basicConfig(level=logging.DEBUG)
+    logging.info('Building LCP array')
+    begin = clock()
+    np.save(bwtDir + 'lcps.npy', LCPGen.lcpGenerator(bwtDir, maxReadLen+1, logging.getLogger()))
+    logging.info('Finished building LCP in %d s', clock() - begin)
+
+
 def main():
-    willBeMain('/playpen/sgreens/ecoli/EAS20_8/cov20.txt', '/playpen/sgreens/ecoli/msbwt20/rle_bwt/',
-               outFilename='/playpen/sgreens/ecoli/msbwt20/corrected.fastq', numProcesses=4)
+    # buildLCP('/playpen/sgreens/fq_celegans/msbwt/bwt/', 101)
+    # willBeMain('/playpen/sgreens/ecoli/EAS20_8/cov20.txt', '/playpen/sgreens/ecoli/msbwt20/rle_bwt/',
+    #            outFilename='/playpen/sgreens/ecoli/msbwt20/corrected.fastq', numProcesses=4)
+    prefix = '/playpen/sgreens/fq_celegans/'
+    willBeMain(prefix + 'cov10.txt', prefix + '/msbwt/bwt/', 101,
+               outFilename=prefix+'/msbwt/corrected.fastq', numProcesses=4)
