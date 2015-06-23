@@ -26,11 +26,12 @@ def grouper(iterable, n, fillvalue=None):
 
 def createReads():
     with open('/playpen/sgreens/ecoli/sequence.fasta', 'r') as fp:
-        ref = ''.join(fp.read().split())  # remove newlines
+        ref = ''.join(fp.read().split('\n')[1:])  # remove newlines
+    print ref[:100]
     ref = ref[:100000]
     with open('/playpen/sgreens/ecoli/EAS20_8/fake20.txt', 'w') as fp:
         for readNum in xrange((COVERAGE * len(ref)) / READ_LEN):
-        # for readNum in xrange(2000):
+        # for readNum in xrange(200):
             start = randint(0, len(ref) - READ_LEN)
             origRead = ref[start:start+READ_LEN]  # + ref[start+READ_LEN:start+READ_LEN+3].lower()
             read = []
