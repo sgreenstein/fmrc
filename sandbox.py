@@ -43,27 +43,27 @@ def grouper(iterable, n, fillvalue=None):
     args = [iter(iterable)] * n
     return izip_longest(fillvalue=fillvalue, *args)
 
-
+@profile
 def superCorrect():
     begin = clock()
     bwt = msbwt.loadBWT(BWT_PATH, False)
     trusted = np.empty(READ_LEN-K+1, dtype=np.uint8)
     corrected = np.empty(READ_LEN, dtype=np.uint8)
     with open(PATH + 'corrected2.fa', 'w') as fp:
-        for readID in xrange(bwt.getSymbolCount(0)):
-        # for readID in xrange(10000):
+        # for readID in xrange(bwt.getSymbolCount(0)):
+        for readID in xrange(10000):
             trusted.fill(0)
             corrString = ['0'] * READ_LEN
             origRead = bwt.recoverString(readID)
             origRead = origRead[1:] + '\n'
             # origRead = 'CGGTCGCGCTATACTTTAGATGCCCAGGTCGCTGCATCATGGGTAATGAAGAATAAGGCTGGATAAAGCGACGTTGTGTACCGTCACTTTCTTCAATCGT\n'
             read = list(origRead[:-1])
-            revCounts, _ = bwt.countStrandedSeqMatches(reverseComplement(origRead[:-1]), K)
+            revCounts = bwt.countStrandedSeqMatchesNoOther(reverseComplement(origRead[:-1]), K)
             revCounts = np.flipud(revCounts)
             trusted = (revCounts > 0).astype(np.uint8)
             corrected.fill(0)
             if False in trusted:
-                counts, _ = bwt.countStrandedSeqMatches(origRead[:-1], K)
+                counts = bwt.countStrandedSeqMatchesNoOther(origRead[:-1], K)
                 trusted |= counts > HI_THRESH
                 changeMade = True
                 while changeMade:
@@ -76,8 +76,9 @@ def superCorrect():
                                     for base in BASES:
                                         lo, hi = bwt.findIndicesOfStr(''.join(read[i+1:i+K]) + base)
                                         rcLo, rcHi = bwt.findIndicesOfStr(reverseComplement(''.join(read[i+1:i+K]) + base))
-                                        if hi - lo + rcHi - rcLo > bestSupport:
-                                            bestSupport = hi - lo + rcHi - rcLo
+                                        support = hi - lo + rcHi - rcLo
+                                        if support > bestSupport:
+                                            bestSupport = support
                                             bestBase = base
                                     if bestBase != read[i+K]:
                                         changeMade = True
@@ -86,11 +87,11 @@ def superCorrect():
                                         corrString[i+K] = '1'
                                     if corrected[i+K]:
                                         kmersEnd = min(len(read), i+2*K)
-                                        newCounts, _ = bwt.countStrandedSeqMatches(''.join(read[i+1:kmersEnd]), K)
+                                        newCounts = bwt.countStrandedSeqMatchesNoOther(''.join(read[i+1:kmersEnd]), K)
                                         trusted[i+1:kmersEnd-K+1] = newCounts > HI_THRESH
                                         counts[i+1:kmersEnd-K+1] = newCounts
                                         if False in trusted[i+1:kmersEnd-K+1]:
-                                            newCounts, _ = bwt.countStrandedSeqMatches(
+                                            newCounts = bwt.countStrandedSeqMatchesNoOther(
                                                 reverseComplement(''.join(read[i+1:kmersEnd])), K)
                                             newCounts = np.flipud(newCounts)
                                             trusted[i+1:kmersEnd-K+1] |= newCounts > 0
@@ -99,8 +100,9 @@ def superCorrect():
                                 for base in BASES:
                                     lo, hi = bwt.findIndicesOfStr(base + ''.join(read[i+1:i+K]))
                                     rcLo, rcHi = bwt.findIndicesOfStr(reverseComplement(base + ''.join(read[i+1:i+K])))
-                                    if hi - lo + rcHi - rcLo > bestSupport:
-                                        bestSupport = hi - lo + rcHi - rcLo
+                                    support = hi - lo + rcHi - rcLo
+                                    if support > bestSupport:
+                                        bestSupport = support
                                         bestBase = base
                                 if bestBase != read[i]:
                                     changeMade = True
@@ -109,11 +111,11 @@ def superCorrect():
                                     corrString[i] = '1'
                                 if corrected[i]:
                                     kmersStart = max(0, i-K)
-                                    newCounts, _ = bwt.countStrandedSeqMatches(''.join(read[kmersStart:i+K]), K)
+                                    newCounts = bwt.countStrandedSeqMatchesNoOther(''.join(read[kmersStart:i+K]), K)
                                     trusted[kmersStart:i+1] = newCounts > HI_THRESH
                                     counts[kmersStart:i+1] = newCounts
                                     if False in trusted[kmersStart:i+1]:
-                                        newCounts, _ = bwt.countStrandedSeqMatches(
+                                        newCounts = bwt.countStrandedSeqMatchesNoOther(
                                             reverseComplement(''.join(read[kmersStart:i+K])), K)
                                         newCounts = np.flipud(newCounts)
                                         trusted[kmersStart:i+1] |= newCounts > 0
@@ -439,6 +441,7 @@ def main(function):
     if function == 'correct':
         superCorrect()
     else:
+        superCorrect()
         # np.save('/playpen/sgreens/fake/bwt/lcps.npy', LCPGen.lcpGenerator(BWT_PATH, READ_LEN+1, getLogger()))
         # cProfile.run('correct()')
         # compareQuals('/playpen/sgreens/ecoli/uncorrected20.sam')
@@ -450,7 +453,7 @@ def main(function):
         # summarizeBam('/playpen/sgreens/fq_celegans/sga/sga.sam', celegans)
         # summarizeBam('/playpen/sgreens/fq_celegans/msbwt/msbwt.sam', celegans)
         # summarizeBam('/playpen/sgreens/fq_celegans/uncorrected.sam', celegans)
-        summarizeBam('/playpen/sgreens/ecoli/sga20/k12x6.sam', ecoli)
+        # summarizeBam('/playpen/sgreens/ecoli/sga20/k12x6.sam', ecoli)
         # for i in xrange(19, 30, 2):
         #     print 'k =', i
         #     summarizeBam('/playpen/sgreens/ecoli/sga20/k' + str(i) + '.sam')

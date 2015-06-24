@@ -30,6 +30,7 @@ def fastaParser(fasta, int start, int end):
         for _ in xrange(start, end):
             yield fp.next(), fp.next(), fp.next(), fp.next()
 
+
 @cython.boundscheck(False)
 def correct(inFastqFile, bwtDir, k, hiThresh, numProcesses, processNum):
     begin = clock()
