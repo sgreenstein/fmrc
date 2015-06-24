@@ -73,9 +73,11 @@ def superCorrect():
                             if trusted[i] or read[i+K] == 'N':
                                 if not trusted[i+1] or read[i+K] == 'N':  # err at read[i+K]
                                     bestSupport = 0
+                                    newLo, newHi = bwt.findIndicesOfStr(reverseComplement(''.join(read[i+1:i+K])))
                                     for base in BASES:
+                                        rcLo = bwt.getOccurrenceOfCharAtIndex(BASE_TO_NUM[base.translate(TRAN_TAB)], newLo)
+                                        rcHi = bwt.getOccurrenceOfCharAtIndex(BASE_TO_NUM[base.translate(TRAN_TAB)], newHi)
                                         lo, hi = bwt.findIndicesOfStr(''.join(read[i+1:i+K]) + base)
-                                        rcLo, rcHi = bwt.findIndicesOfStr(reverseComplement(''.join(read[i+1:i+K]) + base))
                                         support = hi - lo + rcHi - rcLo
                                         if support > bestSupport:
                                             bestSupport = support
@@ -97,8 +99,10 @@ def superCorrect():
                                             trusted[i+1:kmersEnd-K+1] |= newCounts > 0
                             elif trusted[i+1] and not corrected[i]:  # err at read[i]
                                 bestSupport = 0
+                                newLo, newHi = bwt.findIndicesOfStr(''.join(read[i+1:i+K]))
                                 for base in BASES:
-                                    lo, hi = bwt.findIndicesOfStr(base + ''.join(read[i+1:i+K]))
+                                    lo = bwt.getOccurrenceOfCharAtIndex(BASE_TO_NUM[base], newLo)
+                                    hi = bwt.getOccurrenceOfCharAtIndex(BASE_TO_NUM[base], newHi)
                                     rcLo, rcHi = bwt.findIndicesOfStr(reverseComplement(base + ''.join(read[i+1:i+K])))
                                     support = hi - lo + rcHi - rcLo
                                     if support > bestSupport:

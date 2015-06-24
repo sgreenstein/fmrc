@@ -1,9 +1,13 @@
+#cython: boundscheck=False
+#cython: wraparound=False
+
 from MUSCython import MultiStringBWTCython as msbwt, LCPGen
 from MUSCython.BasicBWT cimport BasicBWT
 from time import clock
 from tempfile import NamedTemporaryFile
 import logging
 from multiprocessing import Pool
+from exceptions import OSError
 from os import remove, path
 from string import maketrans
 from functools import partial
@@ -13,16 +17,16 @@ cimport numpy as np
 
 cdef list BASES = ['A', 'C', 'G', 'T']
 
-BASE_NUMS = {'A': 1, 'C': 2, 'G': 3, 'T': 5}
-NUM_TO_BASE = ['A', 'C', 'G', 'N', 'T', '$']
+cdef dict BASE_TO_NUM = {'A': 1, 'C': 2, 'G': 3, 'T': 5}
+cdef list NUM_TO_BASE = ['A', 'C', 'G', 'N', 'T', '$']
 
-TRAN_TAB = maketrans('ACGT', 'TGCA')
+cdef bytes TRAN_TAB = maketrans('ACGT', 'TGCA')
 
-cdef bytes reverseComplement(seq):
+cdef bytes reverseComplement(bytes seq):
     return seq[::-1].translate(TRAN_TAB)
 
 
-def fastaParser(fasta, int start, int end):
+def fastaParser(bytes fasta, int start, int end):
     cdef long _
     with open(fasta, 'r') as fp:
         for _ in xrange(start*4):
@@ -31,8 +35,7 @@ def fastaParser(fasta, int start, int end):
             yield fp.next(), fp.next(), fp.next(), fp.next()
 
 
-@cython.boundscheck(False)
-def correct(inFastqFile, bwtDir, k, hiThresh, numProcesses, processNum):
+cpdef bytes correct(bytes inFastqFile, bytes bwtDir, int k, int loThresh, int hiThresh, int numProcesses, int processNum):
     begin = clock()
     cdef BasicBWT bwt = msbwt.loadBWT(bwtDir, False)
     cdef np.ndarray[np.uint8_t] corrected
@@ -41,7 +44,7 @@ def correct(inFastqFile, bwtDir, k, hiThresh, numProcesses, processNum):
     cdef np.ndarray[np.uint64_t] revCounts
     cdef np.ndarray[np.uint64_t] newCounts
     cdef int readsPerProcess = (bwt.getSymbolCount(0) / numProcesses) + 1
-    cdef int kmersEnd, kmersStart
+    cdef int i, kmersEnd, kmersStart
     cdef long lo, hi, rcLo, rcHi, bestSupport, support
     cdef bytes readName, origRead, plus, qual, base, bestBase
     cdef bint changeMade
@@ -54,9 +57,9 @@ def correct(inFastqFile, bwtDir, k, hiThresh, numProcesses, processNum):
                 fastaParser(inFastqFile, readsPerProcess*processNum,
                             min(readsPerProcess * (processNum+1), bwt.getSymbolCount(0))):
             read = list(origRead[:len(origRead)-1])
-            revCounts = bwt.countStrandedSeqMatchesNoOther(reverseComplement(origRead[:len(origRead)-1]), k)
+            revCounts = bwt.countStrandedSeqMatchesNoOther((origRead[:len(origRead)-1])[::-1].translate(TRAN_TAB), k)
             revCounts = np.flipud(revCounts)
-            trusted = (revCounts > 0).astype(np.uint8)
+            trusted = (revCounts > loThresh).astype(np.uint8)
             corrected = np.zeros(len(read), dtype=np.uint8)
             readsDone += 1
             # if not readsDone & 1023:
@@ -72,10 +75,10 @@ def correct(inFastqFile, bwtDir, k, hiThresh, numProcesses, processNum):
                             if trusted[i] or read[i+k] == 'N':
                                 if not trusted[i+1] or read[i+k] == 'N':  # err at read[i+k]
                                     bestSupport = 0
-                                    newLo, newHi = bwt.findIndicesOfStr(reverseComplement(''.join(read[i+1:i+k])))
+                                    newLo, newHi = bwt.findIndicesOfStr((<bytes> ''.join(read[i+1:i+k])[::-1]).translate(TRAN_TAB))
                                     for base in BASES:
-                                        rcLo = bwt.getOccurrenceOfCharAtIndex(BASE_NUMS[base.translate(TRAN_TAB)], newLo)
-                                        rcHi = bwt.getOccurrenceOfCharAtIndex(BASE_NUMS[base.translate(TRAN_TAB)], newHi)
+                                        rcLo = bwt.getOccurrenceOfCharAtIndex(BASE_TO_NUM[base.translate(TRAN_TAB)], newLo)
+                                        rcHi = bwt.getOccurrenceOfCharAtIndex(BASE_TO_NUM[base.translate(TRAN_TAB)], newHi)
                                         lo, hi = bwt.findIndicesOfStr(<bytes> ''.join(read[i+1:i+k]) + base)
                                         support = hi - lo + rcHi - rcLo
                                         if support > bestSupport:
@@ -87,9 +90,9 @@ def correct(inFastqFile, bwtDir, k, hiThresh, numProcesses, processNum):
                                         read[i+k] = bestBase
                                         kmersEnd = min(len(read), i+2*k)
                                         newCounts = bwt.countStrandedSeqMatchesNoOther(
-                                            reverseComplement(''.join(read[i+1:kmersEnd])), k)
+                                            (<bytes> ''.join(read[i+1:kmersEnd]))[::-1].translate(TRAN_TAB), k)
                                         newCounts = np.flipud(newCounts)
-                                        trusted[i+1:kmersEnd-k+1] = newCounts > 0
+                                        trusted[i+1:kmersEnd-k+1] = newCounts > loThresh
                                         if False in trusted[i+1:kmersEnd-k+1]:
                                             newCounts = bwt.countStrandedSeqMatchesNoOther(<bytes> ''.join(read[i+1:kmersEnd]), k)
                                             trusted[i+1:kmersEnd-k+1] |= newCounts > hiThresh
@@ -97,9 +100,9 @@ def correct(inFastqFile, bwtDir, k, hiThresh, numProcesses, processNum):
                                 bestSupport = 0
                                 newLo, newHi = bwt.findIndicesOfStr(<bytes> ''.join(read[i+1:i+k]))
                                 for base in BASES:
-                                    lo = bwt.getOccurrenceOfCharAtIndex(BASE_NUMS[base], newLo)
-                                    hi = bwt.getOccurrenceOfCharAtIndex(BASE_NUMS[base], newHi)
-                                    rcLo, rcHi = bwt.findIndicesOfStr(reverseComplement(base + ''.join(read[i+1:i+k])))
+                                    lo = bwt.getOccurrenceOfCharAtIndex(BASE_TO_NUM[base], newLo)
+                                    hi = bwt.getOccurrenceOfCharAtIndex(BASE_TO_NUM[base], newHi)
+                                    rcLo, rcHi = bwt.findIndicesOfStr((<bytes> (base + ''.join(read[i+1:i+k]))[::-1].translate(TRAN_TAB)))
                                     support = hi - lo + rcHi - rcLo
                                     if support > bestSupport:
                                         bestSupport = support
@@ -110,9 +113,9 @@ def correct(inFastqFile, bwtDir, k, hiThresh, numProcesses, processNum):
                                     read[i] = bestBase
                                     kmersStart = max(0, i-k)
                                     newCounts = bwt.countStrandedSeqMatchesNoOther(
-                                        reverseComplement(''.join(read[kmersStart:i+k])), k)
+                                        reverseComplement(<bytes> ''.join(read[kmersStart:i+k])), k)
                                     newCounts = np.flipud(newCounts)
-                                    trusted[kmersStart:i+1] = newCounts > 0
+                                    trusted[kmersStart:i+1] = newCounts > loThresh
                                     if False in trusted[kmersStart:i+1]:
                                         newCounts = bwt.countStrandedSeqMatchesNoOther(<bytes> ''.join(read[kmersStart:i+k]), k)
                                         trusted[kmersStart:i+1] |= newCounts > hiThresh
@@ -124,17 +127,18 @@ def correct(inFastqFile, bwtDir, k, hiThresh, numProcesses, processNum):
     return tmpFile.name
 
 
-def willBeMain(inFilename, bwtDir, maxReadLen, k=25, hiThresh=5, outFilename='corrected.fastq', numProcesses=1):
+def willBeMain(inFilename, bwtDir, maxReadLen, k=25, loThresh=0, hiThresh=5, outFilename='corrected.fastq', numProcesses=1):
     if not path.isfile(bwtDir+'lcps.npy'):
         buildLCP(bwtDir, maxReadLen)
     logging.basicConfig(level=logging.DEBUG)
     begin = clock()
-    # correct(inFilename, bwtDir, k, hiThresh, 1, 0)
+    # correct(inFilename, bwtDir, k, loThresh, hiThresh, 1, 0)
     # exit()
     pool = Pool(numProcesses)
-    mapFunc = partial(correct, inFilename, bwtDir, k, hiThresh, numProcesses)
+    mapFunc = partial(correct, inFilename, bwtDir, k, loThresh, hiThresh, numProcesses)
     fastqs = pool.map(mapFunc, range(numProcesses))
     logging.info('All child processes finished in %.2f s', clock() - begin)
+    begin = clock()
     logging.info('Combining temporary files...')
     with open(outFilename, 'w') as outFile:
         for fastq in fastqs:
@@ -142,6 +146,7 @@ def willBeMain(inFilename, bwtDir, maxReadLen, k=25, hiThresh=5, outFilename='co
                 for line in inFile:
                     outFile.write(line)
             remove(fastq)
+    logging.info('Combined temporary files in %.2f s', clock() - begin)
     logging.info('Corrected reads saved in %s', outFilename)
 
 
