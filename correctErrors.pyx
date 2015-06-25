@@ -6,8 +6,8 @@ from MUSCython.BasicBWT cimport BasicBWT
 from time import clock
 from tempfile import NamedTemporaryFile
 import logging
+import argparse
 from multiprocessing import Pool
-from exceptions import OSError
 from os import remove, path
 from string import maketrans
 from functools import partial
@@ -25,13 +25,28 @@ cdef bytes TRAN_TAB = maketrans('ACGT', 'TGCA')
 def fastaParser(bytes fasta, int start, int end):
     cdef long _
     with open(fasta, 'r') as fp:
-        for _ in xrange(start*4):
+        lastPos = fp.tell()
+        if fasta.endswith(('.fastq', '.fq')):
+            while not fp.readline().startswith('@'):
+                lastPos = fp.tell()
+            fp.seek(lastPos)
+            for _ in xrange(start*4):
+                    fp.next()
+            for _ in xrange(start, end):
+                yield fp.next(), fp.next(), fp.next(), fp.next()
+        elif fasta.endswith(('.fasta', '.fa')):
+            while not fp.readline().startswith('>'):
+                lastPos = fp.tell()
+            fp.seek(lastPos)
+            for _ in xrange(start*2):
                 fp.next()
-        for _ in xrange(start, end):
-            yield fp.next(), fp.next(), fp.next(), fp.next()
+            for _ in xrange(start, end):
+                yield fp.next(), fp.next(), '', ''
+        else:
+            raise Exception('%s does not have a correct fastq/fasta file extension' % fasta)
 
 
-cpdef bytes correct(bytes inFastqFile, bytes bwtDir, int k, int loThresh, int hiThresh, int numProcesses, int processNum):
+cpdef bytes correct(bytes inFile, bytes bwtDir, int k, int revCompThresh, int forwardThresh, int numProcesses, int processNum):
     begin = clock()
     cdef BasicBWT bwt = msbwt.loadBWT(bwtDir, False)
     cdef np.ndarray[np.uint8_t] corrected
@@ -46,25 +61,26 @@ cpdef bytes correct(bytes inFastqFile, bytes bwtDir, int k, int loThresh, int hi
     cdef np.uint8_t bestBase
     cdef bint changeMade
     cdef char* read
-    tmpFile = NamedTemporaryFile(suffix='.fastq', delete=False)
+    cdef bint printProgress = (processNum == numProcesses - 1)
+    tmpFile = NamedTemporaryFile(suffix=inFile[inFile.rfind('.'):], delete=False)
     logging.info('Process %d / %d: correcting reads %d through %d', processNum, numProcesses,
                  readsPerProcess*processNum, min(readsPerProcess * (processNum+1), bwt.getSymbolCount(0))-1)
     cdef long readsDone = 0
     with tmpFile:
         for readName, origRead, plus, qual in \
-                fastaParser(inFastqFile, readsPerProcess*processNum,
+                fastaParser(inFile, readsPerProcess*processNum,
                             min(readsPerProcess * (processNum+1), bwt.getSymbolCount(0))):
             read = origRead
             revCounts = bwt.countStrandedSeqMatchesNoOther((origRead[len(origRead)-2::-1]).translate(TRAN_TAB), k)
             revCounts = np.flipud(revCounts)
-            trusted = (revCounts > loThresh).astype(np.uint8)
+            trusted = (revCounts > revCompThresh).astype(np.uint8)
             corrected = np.zeros(len(origRead)-1, dtype=np.uint8)
             readsDone += 1
-            # if not readsDone & 1023:
-            #     logging.debug('Finished %d reads', readsDone)
+            if printProgress and not readsDone & 4194303:
+                logging.info('%d reads done', readsPerProcess*processNum + readsDone)
             if False in trusted:
                 counts = bwt.countStrandedSeqMatchesNoOther(origRead[:len(origRead)-1], k)
-                trusted |= counts > hiThresh
+                trusted |= counts > forwardThresh
                 changeMade = True
                 while changeMade:
                     changeMade = False
@@ -73,6 +89,7 @@ cpdef bytes correct(bytes inFastqFile, bytes bwtDir, int k, int loThresh, int hi
                             if trusted[i] or read[i+k] == 'N':
                                 if not trusted[i+1] or read[i+k] == 'N':  # err at read[i+k]
                                     bestSupport = 0
+                                    bestBase = read[i+k]
                                     newLo, newHi = bwt.findIndicesOfStr(read[i+k-1:i:-1].translate(TRAN_TAB))
                                     for base in BASES:
                                         rcLo = bwt.getOccurrenceOfCharAtIndex(BASE_TO_NUM[base.translate(TRAN_TAB)], newLo)
@@ -90,12 +107,13 @@ cpdef bytes correct(bytes inFastqFile, bytes bwtDir, int k, int loThresh, int hi
                                         newCounts = bwt.countStrandedSeqMatchesNoOther(
                                             read[kmersEnd-1:i:-1].translate(TRAN_TAB), k)
                                         newCounts = np.flipud(newCounts)
-                                        trusted[i+1:kmersEnd-k+1] = newCounts > loThresh
+                                        trusted[i+1:kmersEnd-k+1] = newCounts > revCompThresh
                                         if False in trusted[i+1:kmersEnd-k+1]:
                                             newCounts = bwt.countStrandedSeqMatchesNoOther(read[i+1:kmersEnd], k)
-                                            trusted[i+1:kmersEnd-k+1] |= newCounts > hiThresh
+                                            trusted[i+1:kmersEnd-k+1] |= newCounts > forwardThresh
                             elif trusted[i+1] and not corrected[i]:  # err at read[i]
                                 bestSupport = 0
+                                bestBase = read[i]
                                 newLo, newHi = bwt.findIndicesOfStr(read[i+1:i+k])
                                 for base in BASES:
                                     lo = bwt.getOccurrenceOfCharAtIndex(BASE_TO_NUM[base], newLo)
@@ -118,10 +136,10 @@ cpdef bytes correct(bytes inFastqFile, bytes bwtDir, int k, int loThresh, int hi
                                         newCounts = bwt.countStrandedSeqMatchesNoOther(
                                             read[i+k-1:kmersStart-1:-1].translate(TRAN_TAB), k)
                                     newCounts = np.flipud(newCounts)
-                                    trusted[kmersStart:i+1] = newCounts > loThresh
+                                    trusted[kmersStart:i+1] = newCounts > revCompThresh
                                     if False in trusted[kmersStart:i+1]:
                                         newCounts = bwt.countStrandedSeqMatchesNoOther(read[kmersStart:i+k], k)
-                                        trusted[kmersStart:i+1] |= newCounts > hiThresh
+                                        trusted[kmersStart:i+1] |= newCounts > forwardThresh
             tmpFile.write(readName)
             tmpFile.write(read)
             tmpFile.write(plus)
@@ -130,15 +148,15 @@ cpdef bytes correct(bytes inFastqFile, bytes bwtDir, int k, int loThresh, int hi
     return tmpFile.name
 
 
-def willBeMain(inFilename, bwtDir, maxReadLen, k=25, loThresh=0, hiThresh=5, outFilename='corrected.fastq', numProcesses=1):
+def driver(inFilename, bwtDir, maxReadLen, k=25, revCompThresh=0, forwardThresh=5, outFilename='corrected.fastq', numProcesses=1):
     if not path.isfile(bwtDir+'lcps.npy'):
         buildLCP(bwtDir, maxReadLen)
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(format='%(asctime)s %(message)s', level=logging.DEBUG)
     begin = clock()
-    # correct(inFilename, bwtDir, k, loThresh, hiThresh, 1, 0)
+    # correct(inFilename, bwtDir, k, revCompThresh, forwardThresh, 1, 0)
     # exit()
     pool = Pool(numProcesses)
-    mapFunc = partial(correct, inFilename, bwtDir, k, loThresh, hiThresh, numProcesses)
+    mapFunc = partial(correct, inFilename, bwtDir, k, revCompThresh, forwardThresh, numProcesses)
     fastqs = pool.map(mapFunc, range(numProcesses))
     logging.info('All child processes finished in %.2f s', clock() - begin)
     begin = clock()
@@ -154,7 +172,7 @@ def willBeMain(inFilename, bwtDir, maxReadLen, k=25, loThresh=0, hiThresh=5, out
 
 
 def buildLCP(bwtDir, maxReadLen):
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(format='%(asctime)s %(message)s', level=logging.DEBUG)
     logging.info('Building LCP array')
     begin = clock()
     cdef np.ndarray[np.uint8_t] lcps = LCPGen.lcpGenerator(bwtDir, maxReadLen+1, logging.getLogger())
@@ -163,9 +181,50 @@ def buildLCP(bwtDir, maxReadLen):
 
 
 def main():
-    # buildLCP('/playpen/sgreens/fq_celegans/msbwt/bwt/', 101)
-    # willBeMain('/playpen/sgreens/ecoli/EAS20_8/cov20.txt', '/playpen/sgreens/ecoli/msbwt20/rle_bwt/', 101,
+    # driver('/playpen/sgreens/ecoli/EAS20_8/cov20.fastq', '/playpen/sgreens/ecoli/msbwt20/rle_bwt/', 101,
     #            outFilename='/playpen/sgreens/ecoli/msbwt20/corrected.fastq', numProcesses=4)
     prefix = '/playpen/sgreens/fq_celegans/'
-    willBeMain(prefix + 'srr065388.fastq', prefix + '/msbwt60/bwt/', 101,
+    driver(prefix + 'srr065388.fastq', prefix + '/msbwt60/bwt/', 101,
                outFilename=prefix+'/msbwt60/corrected.fastq', numProcesses=4)
+    # parser = argparse.ArgumentParser()
+    # parser.add_argument('inFile', help='the input fasta/fastq file of reads')
+    # parser.add_argument('-b', '--bwtDir', metavar='bwtDir', dest='bwtDir', required=True, help='the directory containing the MSBWT')
+    # parser.add_argument('-l', '--maxReadLength', metavar='maxReadLength', required=True, type=int, dest='maxReadLen',
+    #                     help='the length of the longest read in the input file')
+    # parser.add_argument('-k', default=25, metavar='k', type=int, dest='k', help='k-mer size')
+    # parser.add_argument('-r', '--revCompThresh', metavar='revCompThresh', type=int, default=0, dest='revCompThresh',
+    #                     help='k-mers whose reverse complement occurs more than this threshold will be trusted')
+    # parser.add_argument('-f', '--forwardThresh', metavar='forwardThresh', type=int, default=5, dest='forwardThresh',
+    #                     help='k-mers that occur more than this threshold will be trusted')
+    # parser.add_argument('-o', metavar='outFile', dest='outFile', default='corrected',
+    #                     help='the output fasta/fastq file of corrected reads')
+    # parser.add_argument('-p', default=1, metavar='numProcesses', type=int, dest='numProcesses',
+    #                     help='number of processes to use')
+    # args = parser.parse_args()
+    # fasta = ('.fa', '.fasta')
+    # fastq = ('.fq', '.fastq')
+    # outFile = args.outFile
+    # if args.inFile.endswith(fasta):
+    #     if outFile == 'corrected':
+    #         outFile += '.fasta'
+    # elif args.inFile.endswith(fastq):
+    #     if outFile == 'corrected':
+    #         outFile += '.fastq'
+    # else:
+    #     raise Exception('%s: Does not have correct fasta/fastq file extension' % args.inFile)
+    # if not path.isfile(args.inFile):
+    #     raise Exception('%s: No such file' % args.inFile)
+    # if not 0 < args.k < args.maxReadLen:
+    #     raise Exception('k must satisfy 0 < k < maxReadLen')
+    # if args.forwardThresh < 1:
+    #     raise Exception('forwardThresh must be a positive integer')
+    # if args.revCompThresh < 0:
+    #     raise Exception('revCompThresh must be a non-negative integer')
+    # if args.maxReadLen <= 0:
+    #     raise Exception('maxReadLength must be a positive integer')
+    # try:
+    #     msbwt.loadBWT(args.bwtDir)
+    # except AttributeError:
+    #     raise Exception('%s: Not a valid MSBWT directory' % args.bwtDir)
+    # driver(args.inFile, args.bwtDir, args.maxReadLen, args.k, args.revCompThresh, args.forwardThresh, outFile,
+    #        args.numProcesses)
