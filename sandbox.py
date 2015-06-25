@@ -43,7 +43,8 @@ def grouper(iterable, n, fillvalue=None):
     args = [iter(iterable)] * n
     return izip_longest(fillvalue=fillvalue, *args)
 
-@profile
+
+# @profile
 def superCorrect():
     begin = clock()
     bwt = msbwt.loadBWT(BWT_PATH, False)
@@ -445,14 +446,14 @@ def main(function):
     if function == 'correct':
         superCorrect()
     else:
-        superCorrect()
+        # superCorrect()
         # np.save('/playpen/sgreens/fake/bwt/lcps.npy', LCPGen.lcpGenerator(BWT_PATH, READ_LEN+1, getLogger()))
         # cProfile.run('correct()')
         # compareQuals('/playpen/sgreens/ecoli/uncorrected20.sam')
         # runLengthCorrect()
         # print 'msbwt';
         # summarizeBam('/playpen/sgreens/ecoli/msbwt20/msbwt.sam')
-        # summarizeBam('/playpen/sgreens/ecoli/msbwt20/msbwt_s.sam', ecoli)
+        summarizeBam('/playpen/sgreens/ecoli/msbwt20/msbwt_chars.sam', ecoli)
         # sampleFromInterleaved()
         # summarizeBam('/playpen/sgreens/fq_celegans/sga/sga.sam', celegans)
         # summarizeBam('/playpen/sgreens/fq_celegans/msbwt/msbwt.sam', celegans)

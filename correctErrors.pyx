@@ -22,10 +22,6 @@ cdef list NUM_TO_BASE = ['A', 'C', 'G', 'N', 'T', '$']
 
 cdef bytes TRAN_TAB = maketrans('ACGT', 'TGCA')
 
-cdef bytes reverseComplement(bytes seq):
-    return seq[::-1].translate(TRAN_TAB)
-
-
 def fastaParser(bytes fasta, int start, int end):
     cdef long _
     with open(fasta, 'r') as fp:
@@ -46,8 +42,10 @@ cpdef bytes correct(bytes inFastqFile, bytes bwtDir, int k, int loThresh, int hi
     cdef int readsPerProcess = (bwt.getSymbolCount(0) / numProcesses) + 1
     cdef int i, kmersEnd, kmersStart
     cdef long lo, hi, rcLo, rcHi, bestSupport, support
-    cdef bytes readName, origRead, plus, qual, base, bestBase
+    cdef bytes readName, origRead, plus, qual, base
+    cdef np.uint8_t bestBase
     cdef bint changeMade
+    cdef char* read
     tmpFile = NamedTemporaryFile(suffix='.fastq', delete=False)
     logging.info('Process %d / %d: correcting reads %d through %d', processNum, numProcesses,
                  readsPerProcess*processNum, min(readsPerProcess * (processNum+1), bwt.getSymbolCount(0))-1)
@@ -56,11 +54,11 @@ cpdef bytes correct(bytes inFastqFile, bytes bwtDir, int k, int loThresh, int hi
         for readName, origRead, plus, qual in \
                 fastaParser(inFastqFile, readsPerProcess*processNum,
                             min(readsPerProcess * (processNum+1), bwt.getSymbolCount(0))):
-            read = list(origRead[:len(origRead)-1])
-            revCounts = bwt.countStrandedSeqMatchesNoOther((origRead[:len(origRead)-1])[::-1].translate(TRAN_TAB), k)
+            read = origRead
+            revCounts = bwt.countStrandedSeqMatchesNoOther((origRead[len(origRead)-2::-1]).translate(TRAN_TAB), k)
             revCounts = np.flipud(revCounts)
             trusted = (revCounts > loThresh).astype(np.uint8)
-            corrected = np.zeros(len(read), dtype=np.uint8)
+            corrected = np.zeros(len(origRead)-1, dtype=np.uint8)
             readsDone += 1
             # if not readsDone & 1023:
             #     logging.debug('Finished %d reads', readsDone)
@@ -75,52 +73,57 @@ cpdef bytes correct(bytes inFastqFile, bytes bwtDir, int k, int loThresh, int hi
                             if trusted[i] or read[i+k] == 'N':
                                 if not trusted[i+1] or read[i+k] == 'N':  # err at read[i+k]
                                     bestSupport = 0
-                                    newLo, newHi = bwt.findIndicesOfStr((<bytes> ''.join(read[i+1:i+k])[::-1]).translate(TRAN_TAB))
+                                    newLo, newHi = bwt.findIndicesOfStr(read[i+k-1:i:-1].translate(TRAN_TAB))
                                     for base in BASES:
                                         rcLo = bwt.getOccurrenceOfCharAtIndex(BASE_TO_NUM[base.translate(TRAN_TAB)], newLo)
                                         rcHi = bwt.getOccurrenceOfCharAtIndex(BASE_TO_NUM[base.translate(TRAN_TAB)], newHi)
-                                        lo, hi = bwt.findIndicesOfStr(<bytes> ''.join(read[i+1:i+k]) + base)
+                                        lo, hi = bwt.findIndicesOfStr(read[i+1:i+k] + base)
                                         support = hi - lo + rcHi - rcLo
                                         if support > bestSupport:
                                             bestSupport = support
-                                            bestBase = base
+                                            bestBase = ord(base)
                                     if bestBase != read[i+k]:
                                         changeMade = True
                                         corrected[i+k] = True
                                         read[i+k] = bestBase
-                                        kmersEnd = min(len(read), i+2*k)
+                                        kmersEnd = min(len(origRead)-1, i+2*k)
                                         newCounts = bwt.countStrandedSeqMatchesNoOther(
-                                            (<bytes> ''.join(read[i+1:kmersEnd]))[::-1].translate(TRAN_TAB), k)
+                                            read[kmersEnd-1:i:-1].translate(TRAN_TAB), k)
                                         newCounts = np.flipud(newCounts)
                                         trusted[i+1:kmersEnd-k+1] = newCounts > loThresh
                                         if False in trusted[i+1:kmersEnd-k+1]:
-                                            newCounts = bwt.countStrandedSeqMatchesNoOther(<bytes> ''.join(read[i+1:kmersEnd]), k)
+                                            newCounts = bwt.countStrandedSeqMatchesNoOther(read[i+1:kmersEnd], k)
                                             trusted[i+1:kmersEnd-k+1] |= newCounts > hiThresh
                             elif trusted[i+1] and not corrected[i]:  # err at read[i]
                                 bestSupport = 0
-                                newLo, newHi = bwt.findIndicesOfStr(<bytes> ''.join(read[i+1:i+k]))
+                                newLo, newHi = bwt.findIndicesOfStr(read[i+1:i+k])
                                 for base in BASES:
                                     lo = bwt.getOccurrenceOfCharAtIndex(BASE_TO_NUM[base], newLo)
                                     hi = bwt.getOccurrenceOfCharAtIndex(BASE_TO_NUM[base], newHi)
-                                    rcLo, rcHi = bwt.findIndicesOfStr((<bytes> (base + ''.join(read[i+1:i+k]))[::-1].translate(TRAN_TAB)))
+                                    rcLo, rcHi = bwt.findIndicesOfStr((read[i+k-1:i:-1] + base).translate(TRAN_TAB))
                                     support = hi - lo + rcHi - rcLo
                                     if support > bestSupport:
                                         bestSupport = support
-                                        bestBase = base
+                                        bestBase = ord(base)
                                 if bestBase != read[i]:
                                     changeMade = True
                                     corrected[i] = True
                                     read[i] = bestBase
-                                    kmersStart = max(0, i-k)
-                                    newCounts = bwt.countStrandedSeqMatchesNoOther(
-                                        reverseComplement(<bytes> ''.join(read[kmersStart:i+k])), k)
+                                    if i-k <= 0:
+                                        kmersStart = 0
+                                        newCounts = bwt.countStrandedSeqMatchesNoOther(
+                                            read[i+k-1::-1].translate(TRAN_TAB), k)
+                                    else:
+                                        kmersStart = i-k
+                                        newCounts = bwt.countStrandedSeqMatchesNoOther(
+                                            read[i+k-1:kmersStart-1:-1].translate(TRAN_TAB), k)
                                     newCounts = np.flipud(newCounts)
                                     trusted[kmersStart:i+1] = newCounts > loThresh
                                     if False in trusted[kmersStart:i+1]:
-                                        newCounts = bwt.countStrandedSeqMatchesNoOther(<bytes> ''.join(read[kmersStart:i+k]), k)
+                                        newCounts = bwt.countStrandedSeqMatchesNoOther(read[kmersStart:i+k], k)
                                         trusted[kmersStart:i+1] |= newCounts > hiThresh
             tmpFile.write(readName)
-            tmpFile.write(''.join(read) + '\n')
+            tmpFile.write(read)
             tmpFile.write(plus)
             tmpFile.write(qual)
     logging.info('Process %d finished in %.2f s', processNum, clock() - begin)
@@ -161,8 +164,8 @@ def buildLCP(bwtDir, maxReadLen):
 
 def main():
     # buildLCP('/playpen/sgreens/fq_celegans/msbwt/bwt/', 101)
-    willBeMain('/playpen/sgreens/ecoli/EAS20_8/cov20.txt', '/playpen/sgreens/ecoli/msbwt20/rle_bwt/', 101,
-               outFilename='/playpen/sgreens/ecoli/msbwt20/corrected.fastq', numProcesses=4)
-    # prefix = '/playpen/sgreens/fq_celegans/'
-    # willBeMain(prefix + 'cov10.txt', prefix + '/msbwt/bwt/', 101,
-    #            outFilename=prefix+'/msbwt/corrected.fastq', numProcesses=4)
+    # willBeMain('/playpen/sgreens/ecoli/EAS20_8/cov20.txt', '/playpen/sgreens/ecoli/msbwt20/rle_bwt/', 101,
+    #            outFilename='/playpen/sgreens/ecoli/msbwt20/corrected.fastq', numProcesses=4)
+    prefix = '/playpen/sgreens/fq_celegans/'
+    willBeMain(prefix + 'srr065388.fastq', prefix + '/msbwt60/bwt/', 101,
+               outFilename=prefix+'/msbwt60/corrected.fastq', numProcesses=4)
