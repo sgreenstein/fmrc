@@ -55,7 +55,7 @@ cpdef bytes correct(bytes inFile, bytes bwtDir, int k, int revCompThresh, int fo
     cdef np.ndarray[np.uint64_t] revCounts
     cdef np.ndarray[np.uint64_t] newCounts
     cdef int readsPerProcess = (bwt.getSymbolCount(0) / numProcesses) + 1
-    cdef int i, kmersEnd, kmersStart
+    cdef int i, kmersEnd, kmersStart, readLen
     cdef long lo, hi, rcLo, rcHi, bestSupport, support
     cdef bytes readName, origRead, plus, qual, base
     cdef np.uint8_t bestBase
@@ -71,15 +71,16 @@ cpdef bytes correct(bytes inFile, bytes bwtDir, int k, int revCompThresh, int fo
                 fastaParser(inFile, readsPerProcess*processNum,
                             min(readsPerProcess * (processNum+1), bwt.getSymbolCount(0))):
             read = origRead
-            revCounts = bwt.countStrandedSeqMatchesNoOther((origRead[len(origRead)-2::-1]).translate(TRAN_TAB), k)
+            readLen = len(origRead)-1
+            revCounts = bwt.countStrandedSeqMatchesNoOther((origRead[readLen-1::-1]).translate(TRAN_TAB), k)
             revCounts = np.flipud(revCounts)
             trusted = (revCounts > revCompThresh).astype(np.uint8)
-            corrected = np.zeros(len(origRead)-1, dtype=np.uint8)
+            corrected = np.zeros(readLen, dtype=np.uint8)
             readsDone += 1
             if printProgress and not readsDone & 4194303:
                 logging.info('%d reads done', readsPerProcess*processNum + readsDone)
             if False in trusted:
-                counts = bwt.countStrandedSeqMatchesNoOther(origRead[:len(origRead)-1], k)
+                counts = bwt.countStrandedSeqMatchesNoOther(origRead[:readLen], k)
                 trusted |= counts > forwardThresh
                 changeMade = True
                 while changeMade:
@@ -103,7 +104,7 @@ cpdef bytes correct(bytes inFile, bytes bwtDir, int k, int revCompThresh, int fo
                                         changeMade = True
                                         corrected[i+k] = True
                                         read[i+k] = bestBase
-                                        kmersEnd = min(len(origRead)-1, i+2*k)
+                                        kmersEnd = min(readLen, i+2*k)
                                         newCounts = bwt.countStrandedSeqMatchesNoOther(
                                             read[kmersEnd-1:i:-1].translate(TRAN_TAB), k)
                                         newCounts = np.flipud(newCounts)
