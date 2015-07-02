@@ -1,11 +1,12 @@
 from random import randint, choice
 from itertools import izip_longest
 from string import maketrans
+from collections import Counter
 import matplotlib
 matplotlib.use('Agg')
 from matplotlib import pyplot as plot
 
-COVERAGE = 20
+COVERAGE = 50
 READ_LEN = 100
 ERR_ODDS = 100  # i.e. 1 in ERR_ODDS chance of error
 INDEL_ODDS = 1000
@@ -29,23 +30,26 @@ def createReads():
         ref = ''.join(fp.read().split('\n')[1:])  # remove newlines
     print ref[:100]
     ref = ref[:100000]
-    with open('/playpen/sgreens/ecoli/EAS20_8/fake20.txt', 'w') as fp:
+    with open('/playpen/sgreens/ecoli/EAS20_8/fake20.fastq', 'w') as fp:
         for readNum in xrange((COVERAGE * len(ref)) / READ_LEN):
         # for readNum in xrange(200):
             start = randint(0, len(ref) - READ_LEN)
-            origRead = ref[start:start+READ_LEN]  # + ref[start+READ_LEN:start+READ_LEN+3].lower()
+            origRead = ref[start-3:start] + ref[start:start+READ_LEN] + ref[start+READ_LEN:start+READ_LEN+3]
             read = []
             readPos = 0
             refPos = 0
+            errList = ''
             while readPos < READ_LEN:
                 if randint(1, INDEL_ODDS) == 1:
                     length = randint(1, 3)
                     if randint(0, 1):
                         refPos += length
+                        errList += 'D' * length
                     else:
                         for i in xrange(length):
                             read.append(choice(BASES))
                             readPos += 1
+                        errList += 'I' * length
                 elif randint(1, ERR_ODDS) == 1:
                     newBase = choice(BASES)
                     while newBase == ref[start+refPos]:
@@ -53,17 +57,20 @@ def createReads():
                     read.append(newBase)
                     refPos += 1
                     readPos += 1
+                    errList += 'S'
                 else:
                     read.append(ref[start+refPos])
                     refPos += 1
                     readPos += 1
+                    errList += '-'
             read = ''.join(read[:READ_LEN])
             if randint(0, 1):
                 read = reverseComplement(read)
                 origRead = reverseComplement(origRead)
+                errList = errList[::-1]
             fp.write('@' + str(readNum) + '\n')
             fp.write(read + '\n')
-            fp.write('+\n')
+            fp.write(errList + '\n')
             fp.write(origRead + '\n')
 
 
@@ -118,8 +125,35 @@ def correction():
         'total reads: %.2f%%' % (((fixed+botched)*100.)/(fixed+botched+ignored+tried))
 
 
+def assessCorrection(fastq):
+    tp = 0
+    fp = 0
+    fn = 0
+    tn = 0
+    with open(fastq) as fp:
+        for readName, read, errString, origRead in grouper(fp, 4):
+            read = read[:-1]
+            origRead = origRead[:-1]
+            if read in origRead:
+                tn += errString.count('-')
+                tp += len(read) - errString.count('-')
+            else:
+                for base, origBase, err in zip(read, origRead[3:], errString):
+                    if base == origBase:
+                        if err == '-':
+                            tn += 1
+                        else:
+                            fn += 1
+                    else:
+                        if err == '-':
+                            fp += 1
+                        else:
+                            tp += 1
+
+
 def main():
     createReads()
+    # assessCorrection('/playpen/sgreens/ecoli/msbwtfake20/corrected.fastq')
     # correction()
     # measurePerformance()
 

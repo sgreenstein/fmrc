@@ -48,7 +48,7 @@ def fastaParser(bytes fasta, int start, int end):
 
 cpdef bytes correct(bytes inFile, bytes bwtDir, int k, int revCompThresh, int forwardThresh, int numProcesses, int processNum):
     begin = clock()
-    cdef BasicBWT bwt = msbwt.loadBWT(bwtDir, False)
+    cdef BasicBWT bwt = msbwt.loadBWT(bwtDir, True)
     cdef np.ndarray[np.uint8_t] corrected
     cdef np.ndarray[np.uint8_t] trusted
     cdef np.ndarray[np.uint64_t] counts
@@ -62,7 +62,7 @@ cpdef bytes correct(bytes inFile, bytes bwtDir, int k, int revCompThresh, int fo
     cdef bint changeMade
     cdef char* read
     cdef bint printProgress = (processNum == numProcesses - 1)
-    tmpFile = NamedTemporaryFile(suffix=inFile[inFile.rfind('.'):], delete=False)
+    tmpFile = NamedTemporaryFile(dir=bwtDir, suffix=inFile[inFile.rfind('.'):], delete=False)
     logging.info('Process %d / %d: correcting reads %d through %d', processNum, numProcesses,
                  readsPerProcess*processNum, min(readsPerProcess * (processNum+1), bwt.getSymbolCount(0))-1)
     cdef long readsDone = 0
@@ -149,7 +149,7 @@ cpdef bytes correct(bytes inFile, bytes bwtDir, int k, int revCompThresh, int fo
     return tmpFile.name
 
 
-def driver(inFilename, bwtDir, maxReadLen, k=25, revCompThresh=0, forwardThresh=5, outFilename='corrected.fastq', numProcesses=1):
+def driver(inFilename, bwtDir, maxReadLen, k=25, revCompThresh=2, forwardThresh=5, outFilename='corrected.fastq', numProcesses=1):
     if not path.isfile(bwtDir+'lcps.npy'):
         buildLCP(bwtDir, maxReadLen)
     logging.basicConfig(format='%(asctime)s %(message)s', level=logging.DEBUG)
@@ -184,9 +184,11 @@ def buildLCP(bwtDir, maxReadLen):
 def main():
     # driver('/playpen/sgreens/ecoli/EAS20_8/cov20.fastq', '/playpen/sgreens/ecoli/msbwt20/rle_bwt/', 101,
     #            outFilename='/playpen/sgreens/ecoli/msbwt20/corrected.fastq', numProcesses=4)
-    prefix = '/playpen/sgreens/fq_celegans/'
-    driver(prefix + 'srr065388.fastq', prefix + '/msbwt60/bwt/', 101,
-               outFilename=prefix+'/msbwt60/corrected.fastq', numProcesses=4)
+    driver('/playpen/sgreens/ecoli/EAS20_8/fake20.fastq', '/playpen/sgreens/ecoli/msbwtfake/bwt_50/', 101,
+               outFilename='/playpen/sgreens/ecoli/msbwtfake/corrected.fastq', numProcesses=4)
+    # prefix = '/playpen/sgreens/fq_celegans/'
+    # driver(prefix + 'srr065388.fastq', prefix + '/msbwt60/bwt/', 101,
+    #            outFilename=prefix+'/msbwt60/corrected.fastq', numProcesses=4)
     # parser = argparse.ArgumentParser()
     # parser.add_argument('inFile', help='the input fasta/fastq file of reads')
     # parser.add_argument('-b', '--bwtDir', metavar='bwtDir', dest='bwtDir', required=True, help='the directory containing the MSBWT')

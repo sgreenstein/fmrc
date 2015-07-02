@@ -331,7 +331,7 @@ def summarizeBam(samFile, refPath, debug=False):
             bases += READ_LEN
             refPos = read.pos
             readPos = 0
-            mismatches = ['0'] * READ_LEN
+            # mismatches = ['0'] * READ_LEN
             for op, count in read.cigar:
                 if op != MATCH and op != SOFT_CLIP and op != HARD_CLIP:
                     errs += 1
@@ -343,7 +343,7 @@ def summarizeBam(samFile, refPath, debug=False):
                             if a != b:
                                 errs += 1
                                 errTypes[MATCH] += 1
-                                mismatches[readPos + errPos] = '1'
+                                # mismatches[readPos + errPos] = '1'
                     elif len(read.cigar) == 1:
                         perfect += 1
                 if op != DEL:
@@ -452,12 +452,15 @@ def main(function):
         # compareQuals('/playpen/sgreens/ecoli/uncorrected20.sam')
         # runLengthCorrect()
         # print 'msbwt';
-        # summarizeBam('/playpen/sgreens/ecoli/msbwt20/msbwt.sam')
-        summarizeBam('/playpen/sgreens/ecoli/msbwt20/msbwt_chars.sam', ecoli)
+        # summarizeBam('/playpen/sgreens/ecoli/msbwt20/msbwt.sam', ecoli)
+        # summarizeBam('/playpen/sgreens/ecoli/musket20/musket.sam', ecoli)
+        # summarizeBam('/playpen/sgreens/ecoli/uncorrected20.sam', ecoli)
+        # summarizeBam('/playpen/sgreens/ecoli/bless20/bless.sam', ecoli)
         # sampleFromInterleaved()
-        # summarizeBam('/playpen/sgreens/fq_celegans/sga/sga.sam', celegans)
-        # summarizeBam('/playpen/sgreens/fq_celegans/msbwt/msbwt.sam', celegans)
-        # summarizeBam('/playpen/sgreens/fq_celegans/uncorrected.sam', celegans)
+        # summarizeBam('/playpen/sgreens/fq_celegans/sga60/sga.sam', celegans)
+        summarizeBam('/playpen/sgreens/fq_celegans/musket60/musket.sam', celegans)
+        # summarizeBam('/playpen/sgreens/fq_celegans/uncorrected60.sam', celegans)
+        # summarizeBam('/playpen/sgreens/fq_celegans/msbwt60/msbwt.sam', celegans)
         # summarizeBam('/playpen/sgreens/ecoli/sga20/k12x6.sam', ecoli)
         # for i in xrange(19, 30, 2):
         #     print 'k =', i
