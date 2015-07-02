@@ -1,0 +1,8 @@
+include MANIFEST.in
+include LICENSE
+include README
+include AUTHORS
+include setup.py
+include setup.cfg
+include *.pyx
+include *.c
