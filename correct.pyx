@@ -56,7 +56,8 @@ def fastaParser(bytes fasta, int start, int end):
             raise Exception('%s does not have a correct fastq/fasta file extension' % fasta)
 
 
-cpdef bytes correct(bytes inFile, bytes bwtDir, int k, int revCompThresh, int forwardThresh, int numProcesses, int processNum):
+cpdef bytes correct(bytes inFile, bytes bwtDir, int k, int revCompThresh, int forwardThresh, bint filterReads,
+                    int numProcesses, int processNum):
     """ Gets reads from a fasta/fastq file, corrects them, and writes a new fasta/fastq file
     :param inFile: path to the input fasta/fastq file
     :param bwtDir: path to the directory in which the msbwt is
@@ -172,15 +173,17 @@ cpdef bytes correct(bytes inFile, bytes bwtDir, int k, int revCompThresh, int fo
                                     if False in trusted[kmersStart:i+1]:
                                         newCounts = bwt.countStrandedSeqMatchesNoOther(read[kmersStart:i+k], k)
                                         trusted[kmersStart:i+1] |= newCounts > forwardThresh
-            tmpFile.write(readName)
-            tmpFile.write(read)
-            tmpFile.write(plus)
-            tmpFile.write(qual)
+            if not filterReads or True in trusted:
+                tmpFile.write(readName)
+                tmpFile.write(read)
+                tmpFile.write(plus)
+                tmpFile.write(qual)
     logging.info('Process %d finished in %.2f s', processNum, clock() - begin)
     return tmpFile.name
 
 
-def driver(inFilename, bwtDir, maxReadLen, k=25, revCompThresh=2, forwardThresh=5, outFilename='corrected.fastq', numProcesses=1):
+def driver(inFilename, bwtDir, maxReadLen, k=25, revCompThresh=2, forwardThresh=5, filterReads=True,
+           outFilename='corrected.fastq', numProcesses=1):
     """ Spawns processes that correct reads
     :param inFilename: path to the input fasta/fastq file containing reads
     :param bwtDir: path to the directory with the bwt in it
@@ -192,11 +195,11 @@ def driver(inFilename, bwtDir, maxReadLen, k=25, revCompThresh=2, forwardThresh=
     :param numProcesses: number of concurrent processes to use
     """
     logging.basicConfig(format='%(asctime)s %(message)s', level=logging.INFO)
-    if not path.isfile(bwtDir+'lcps.npy'):
+    if not path.isfile(path.join(bwtDir, 'lcps.npy')):
         buildLCP(bwtDir, maxReadLen)
     begin = clock()
     pool = Pool(numProcesses)
-    mapFunc = partial(correct, inFilename, bwtDir, k, revCompThresh, forwardThresh, numProcesses)
+    mapFunc = partial(correct, inFilename, bwtDir, k, revCompThresh, forwardThresh, filterReads, numProcesses)
     fastqs = pool.map(mapFunc, range(numProcesses))
     logging.info('All child processes finished in %.2f s', clock() - begin)
     begin = clock()
@@ -220,6 +223,15 @@ def buildLCP(bwtDir, maxReadLen):
 
 
 def main():
+    prefix = '/playpen/sgreens/ecoli/'
+    # correct(prefix+'EAS20_8/cov20.fastq', prefix+'msbwt20/bwt', 25, 0, 5, False, 4, 0)
+    driver(prefix+'EAS20_8/cov20.fastq', prefix+'msbwt20/bwt/', 100, forwardThresh=3, revCompThresh=2, numProcesses=4, outFilename=prefix+'msbwt20/corrected.fastq')
+    # driver(prefix+'EAS20_8/fake20.fastq', prefix+'msbwtfake/bwt_50/', 100, forwardThresh=3, revCompThresh=2,
+    #        numProcesses=1, outFilename=prefix+'msbwtfake/corrected3-2.fastq')
+    # prefix = '/playpen/sgreens/fq_celegans/'
+    # driver(prefix+'srr065388.fastq', prefix+'msbwt60/bwt/', 100, revCompThresh=2, forwardThresh=3, numProcesses=4,
+    #        outFilename=prefix+'msbwt60/corrected.fastq')
+    exit()
     # set up parser
     parser = argparse.ArgumentParser()
     parser.add_argument('inFile', help='the input fasta/fastq file of reads')
@@ -235,6 +247,8 @@ def main():
                         help='the output fasta/fastq file of corrected reads')
     parser.add_argument('-p', default=1, metavar='numProcesses', type=int, dest='numProcesses',
                         help='number of processes to use')
+    parser.add_argument('--Filter', dest='filterReads', metavar='filterReads', action='store_true', default=False,
+                        help='Filters reads with too many errors')
 
     # parse and check args
     args = parser.parse_args()
@@ -265,5 +279,5 @@ def main():
         raise Exception('%s: Not a valid MSBWT directory' % args.bwtDir)
 
     # do correction
-    driver(args.inFile, args.bwtDir, args.maxReadLen, args.k, args.revCompThresh, args.forwardThresh, outFile,
-           args.numProcesses)
+    driver(args.inFile, args.bwtDir, args.maxReadLen, args.k, args.revCompThresh, args.forwardThresh, args.noFilter,
+           outFile, args.numProcesses)
