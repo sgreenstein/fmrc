@@ -56,14 +56,13 @@ def fastaParser(bytes fasta, int start, int end):
             raise Exception('%s does not have a correct fastq/fasta file extension' % fasta)
 
 
-cpdef bytes correct(bytes inFile, bytes bwtDir, int k, int revCompThresh, int forwardThresh, bint filterReads,
+cpdef bytes correct(bytes inFile, bytes bwtDir, int k, int thresh, bint filterReads,
                     int numProcesses, int processNum):
     """ Gets reads from a fasta/fastq file, corrects them, and writes a new fasta/fastq file
     :param inFile: path to the input fasta/fastq file
     :param bwtDir: path to the directory in which the msbwt is
     :param k: k-mer length
-    :param revCompThresh: if a k-mer's reverse complement's count exceeds this threshold, it is trusted
-    :param forwardThresh: if a k-mer's count exceeds this threshold, it is trusted
+    :param thresh: if a k-mer's count exceeds this threshold, it is trusted
     :param numProcesses: how many concurrent processes there are
     :param processNum: the 0-based index of this process
     :return: path to the fasta/fastq file of corrected reads
@@ -97,7 +96,7 @@ cpdef bytes correct(bytes inFile, bytes bwtDir, int k, int revCompThresh, int fo
             readLen = len(origRead)-1
             revCounts = bwt.countStrandedSeqMatchesNoOther((origRead[readLen-1::-1]).translate(TRAN_TAB), k)
             revCounts = np.flipud(revCounts)
-            trusted = (revCounts > revCompThresh).astype(np.uint8)
+            trusted = (revCounts > thresh).astype(np.uint8)
             corrected = np.zeros(readLen, dtype=np.uint8)
             readsDone += 1
             if printProgress and not readsDone & 1048575:
@@ -105,7 +104,7 @@ cpdef bytes correct(bytes inFile, bytes bwtDir, int k, int revCompThresh, int fo
             if False in trusted:
                 # not all trusted from revcomp counts. Get forward counts
                 counts = bwt.countStrandedSeqMatchesNoOther(origRead[:readLen], k)
-                trusted |= counts > forwardThresh
+                trusted |= counts > thresh + 1
                 changeMade = True
                 while changeMade:
                     # some k-mer(s) still untrusted based on forward and revcomp counts
@@ -137,10 +136,10 @@ cpdef bytes correct(bytes inFile, bytes bwtDir, int k, int revCompThresh, int fo
                                         newCounts = bwt.countStrandedSeqMatchesNoOther(
                                             read[kmersEnd-1:i:-1].translate(TRAN_TAB), k)
                                         newCounts = np.flipud(newCounts)
-                                        trusted[i+1:kmersEnd-k+1] = newCounts > revCompThresh
+                                        trusted[i+1:kmersEnd-k+1] = newCounts > thresh
                                         if False in trusted[i+1:kmersEnd-k+1]:
                                             newCounts = bwt.countStrandedSeqMatchesNoOther(read[i+1:kmersEnd], k)
-                                            trusted[i+1:kmersEnd-k+1] |= newCounts > forwardThresh
+                                            trusted[i+1:kmersEnd-k+1] |= newCounts > thresh
                             elif trusted[i+1] and not corrected[i]:
                                 # err at read[i]
                                 bestSupport = 0
@@ -169,10 +168,10 @@ cpdef bytes correct(bytes inFile, bytes bwtDir, int k, int revCompThresh, int fo
                                         newCounts = bwt.countStrandedSeqMatchesNoOther(
                                             read[i+k-1:kmersStart-1:-1].translate(TRAN_TAB), k)
                                     newCounts = np.flipud(newCounts)
-                                    trusted[kmersStart:i+1] = newCounts > revCompThresh
+                                    trusted[kmersStart:i+1] = newCounts > thresh
                                     if False in trusted[kmersStart:i+1]:
                                         newCounts = bwt.countStrandedSeqMatchesNoOther(read[kmersStart:i+k], k)
-                                        trusted[kmersStart:i+1] |= newCounts > forwardThresh
+                                        trusted[kmersStart:i+1] |= newCounts > thresh
             if not filterReads or True in trusted:
                 tmpFile.write(readName)
                 tmpFile.write(read)
@@ -182,15 +181,14 @@ cpdef bytes correct(bytes inFile, bytes bwtDir, int k, int revCompThresh, int fo
     return tmpFile.name
 
 
-def driver(inFilename, bwtDir, maxReadLen, k=25, revCompThresh=2, forwardThresh=5, filterReads=True,
+def driver(inFilename, bwtDir, maxReadLen, k=25, thresh=2, filterReads=True,
            outFilename='corrected.fastq', numProcesses=1):
     """ Spawns processes that correct reads
     :param inFilename: path to the input fasta/fastq file containing reads
     :param bwtDir: path to the directory with the bwt in it
     :param maxReadLen: length of the longest read in the bwt
     :param k: k-mer length
-    :param revCompThresh: if a k-mer's reverse complement's count exceeds this threshold, it is trusted
-    :param forwardThresh: if a k-mer's count exceeds this threshold, it is trusted
+    :param thresh: if a k-mer's count exceeds this threshold, it is trusted
     :param outFilename: name of the fasta/fastq file to which to write corrected reads
     :param numProcesses: number of concurrent processes to use
     """
@@ -199,7 +197,7 @@ def driver(inFilename, bwtDir, maxReadLen, k=25, revCompThresh=2, forwardThresh=
         buildLCP(bwtDir, maxReadLen)
     begin = clock()
     pool = Pool(numProcesses)
-    mapFunc = partial(correct, inFilename, bwtDir, k, revCompThresh, forwardThresh, filterReads, numProcesses)
+    mapFunc = partial(correct, inFilename, bwtDir, k, thresh, filterReads, numProcesses)
     fastqs = pool.map(mapFunc, range(numProcesses))
     logging.info('All child processes finished in %.2f s', clock() - begin)
     begin = clock()
@@ -223,15 +221,6 @@ def buildLCP(bwtDir, maxReadLen):
 
 
 def main():
-    prefix = '/playpen/sgreens/ecoli/'
-    # correct(prefix+'EAS20_8/cov20.fastq', prefix+'msbwt20/bwt', 25, 0, 5, False, 4, 0)
-    driver(prefix+'EAS20_8/cov20.fastq', prefix+'msbwt20/bwt/', 100, forwardThresh=3, revCompThresh=2, numProcesses=4, outFilename=prefix+'msbwt20/corrected.fastq')
-    # driver(prefix+'EAS20_8/fake20.fastq', prefix+'msbwtfake/bwt_50/', 100, forwardThresh=3, revCompThresh=2,
-    #        numProcesses=1, outFilename=prefix+'msbwtfake/corrected3-2.fastq')
-    # prefix = '/playpen/sgreens/fq_celegans/'
-    # driver(prefix+'srr065388.fastq', prefix+'msbwt60/bwt/', 100, revCompThresh=2, forwardThresh=3, numProcesses=4,
-    #        outFilename=prefix+'msbwt60/corrected.fastq')
-    exit()
     # set up parser
     parser = argparse.ArgumentParser()
     parser.add_argument('inFile', help='the input fasta/fastq file of reads')
@@ -239,9 +228,7 @@ def main():
     parser.add_argument('-l', '--maxReadLength', metavar='maxReadLength', required=True, type=int, dest='maxReadLen',
                         help='the length of the longest read in the input file')
     parser.add_argument('-k', default=25, metavar='k', type=int, dest='k', help='k-mer size')
-    parser.add_argument('-r', '--revCompThresh', metavar='revCompThresh', type=int, default=0, dest='revCompThresh',
-                        help='k-mers whose reverse complement occurs more than this threshold will be trusted')
-    parser.add_argument('-f', '--forwardThresh', metavar='forwardThresh', type=int, default=5, dest='forwardThresh',
+    parser.add_argument('-t', '--threshold', metavar='threshold', type=int, default=2, dest='thresh',
                         help='k-mers that occur more than this threshold will be trusted')
     parser.add_argument('-o', metavar='outFile', dest='outFile', default='corrected',
                         help='the output fasta/fastq file of corrected reads')
@@ -267,10 +254,8 @@ def main():
         raise Exception('%s: No such file' % args.inFile)
     if not 0 < args.k < args.maxReadLen:
         raise Exception('k must satisfy 0 < k < maxReadLen')
-    if args.forwardThresh < 1:
-        raise Exception('forwardThresh must be a positive integer')
-    if args.revCompThresh < 0:
-        raise Exception('revCompThresh must be a non-negative integer')
+    if args.thresh < 1:
+        raise Exception('threshold must be a positive integer')
     if args.maxReadLen <= 0:
         raise Exception('maxReadLength must be a positive integer')
     try:
@@ -279,5 +264,5 @@ def main():
         raise Exception('%s: Not a valid MSBWT directory' % args.bwtDir)
 
     # do correction
-    driver(args.inFile, args.bwtDir, args.maxReadLen, args.k, args.revCompThresh, args.forwardThresh, args.noFilter,
+    driver(args.inFile, args.bwtDir, args.maxReadLen, args.k, args.thresh, args.noFilter,
            outFile, args.numProcesses)
