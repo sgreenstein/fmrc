@@ -30,11 +30,11 @@ def fastaParser(bytes fasta, int start, int end):
     :param fasta: path to the fasta or fastq file
     :param start: index of the read at which to start parsing
     :param end: index of the read at which to stop parsing (exclusive)
-    :raise Exception: If fasta doesn't end in a fasta or fastq file extension
+    :raise Exception: If input file contains neither a '@' nor a '>'
     """
     cdef long _
     cdef bytes fileType = None
-    # determine file type
+    # determine file type by looking for sequence identifiers
     with open(fasta, 'r') as fp:
         lastPos = fp.tell()
         try:
@@ -198,6 +198,7 @@ def driver(inFilename, bwtDir, maxReadLen, k=25, thresh=2, filterReads=True,
     :param maxReadLen: length of the longest read in the bwt
     :param k: k-mer length
     :param thresh: if a k-mer's count exceeds this threshold, it is trusted
+    :param filterReads: if True, reads that have no trusted k-mers are not output
     :param outFilename: name of the fasta/fastq file to which to write corrected reads
     :param numProcesses: number of concurrent processes to use
     """
@@ -231,13 +232,6 @@ def buildLCP(bwtDir, maxReadLen):
 
 def main():
     # set up parser
-    with open('out-test.fasta', 'w+') as fp:
-        for a, b, c, d in fastaParser('/playpen/sgreens/ecoli/test.fastq', 3, 4):
-            fp.write(a)
-            fp.write(b)
-            fp.write(c)
-            fp.write(d)
-    exit()
     parser = argparse.ArgumentParser()
     parser.add_argument('inFile', help='the input fasta/fastq file of reads')
     parser.add_argument('-b', '--bwtDir', metavar='bwtDir', dest='bwtDir', required=True, help='the directory containing the MSBWT')
@@ -251,21 +245,14 @@ def main():
     parser.add_argument('-p', default=1, metavar='numProcesses', type=int, dest='numProcesses',
                         help='number of processes to use')
     parser.add_argument('--Filter', dest='filterReads', metavar='filterReads', action='store_true', default=False,
-                        help='Filters reads with too many errors')
+                        help='Filter reads with uncorrectable errors')
 
     # parse and check args
     args = parser.parse_args()
-    fasta = ('.fa', '.fasta')
     fastq = ('.fq', '.fastq')
     outFile = args.outFile
-    if args.inFile.endswith(fasta):
-        if outFile == 'corrected':
-            outFile += '.fasta'
-    elif args.inFile.endswith(fastq):
-        if outFile == 'corrected':
-            outFile += '.fastq'
-    else:
-        raise Exception('%s: Does not have correct fasta/fastq file extension' % args.inFile)
+    if outFile == 'corrected':
+        outFile += args.inFile[args.inFile.rfind('.'):]
     if not path.isfile(args.inFile):
         raise Exception('%s: No such file' % args.inFile)
     if not 0 < args.k < args.maxReadLen:
