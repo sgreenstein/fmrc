@@ -7,6 +7,7 @@ from time import clock
 from tempfile import NamedTemporaryFile
 import logging
 import argparse
+from pysam import FastqFile
 from multiprocessing import Pool
 from os import remove, path
 from string import maketrans
@@ -32,28 +33,36 @@ def fastaParser(bytes fasta, int start, int end):
     :raise Exception: If fasta doesn't end in a fasta or fastq file extension
     """
     cdef long _
+    cdef bytes fileType = None
+    # determine file type
     with open(fasta, 'r') as fp:
         lastPos = fp.tell()
-        if fasta.endswith(('.fastq', '.fq')):
-            # skip headers
-            while not fp.readline().startswith('@'):
+        try:
+            while not fileType:
                 lastPos = fp.tell()
-            fp.seek(lastPos)
-            for _ in xrange(start*4):
-                    fp.next()
+                line = fp.readline()
+                if line.startswith('@'):
+                    fileType = bytes('fastq')
+                elif line.startswith('>'):
+                    fileType = bytes('fasta')
+        except StopIteration:
+            raise Exception('Input file could not be parsed as fastq or fasta')
+    # parse file
+    fp = FastqFile(fasta)
+    try:
+        for _ in xrange(start):
+            fp.next()
+        if fileType == 'fastq':
             for _ in xrange(start, end):
-                yield fp.next(), fp.next(), fp.next(), fp.next()
-        elif fasta.endswith(('.fasta', '.fa')):
-            # skip headers
-            while not fp.readline().startswith('>'):
-                lastPos = fp.tell()
-            fp.seek(lastPos)
-            for _ in xrange(start*2):
-                fp.next()
-            for _ in xrange(start, end):
-                yield fp.next(), fp.next(), '', ''
+                read = fp.next()
+                yield '@' + read.name + '\n', read.sequence + '\n', '+\n', read.quality + '\n'
         else:
-            raise Exception('%s does not have a correct fastq/fasta file extension' % fasta)
+            for _ in xrange(start, end):
+                read = fp.next()
+                yield '>' + read.name + '\n', read.sequence + '\n', '', ''
+    except StopIteration:
+        logging.warning('Input %s file does not contain as many reads as the BWT', fileType)
+    fp.close()
 
 
 cpdef bytes correct(bytes inFile, bytes bwtDir, int k, int thresh, bint filterReads,
@@ -222,6 +231,13 @@ def buildLCP(bwtDir, maxReadLen):
 
 def main():
     # set up parser
+    with open('out-test.fasta', 'w+') as fp:
+        for a, b, c, d in fastaParser('/playpen/sgreens/ecoli/test.fastq', 3, 4):
+            fp.write(a)
+            fp.write(b)
+            fp.write(c)
+            fp.write(d)
+    exit()
     parser = argparse.ArgumentParser()
     parser.add_argument('inFile', help='the input fasta/fastq file of reads')
     parser.add_argument('-b', '--bwtDir', metavar='bwtDir', dest='bwtDir', required=True, help='the directory containing the MSBWT')
