@@ -65,8 +65,7 @@ def fastaParser(bytes fasta, int start, int end):
     fp.close()
 
 
-cpdef bytes correct(bytes inFile, bytes bwtDir, int k, int thresh, bint filterReads,
-                    int numProcesses, int processNum):
+cpdef bytes correct(bytes inFile, bytes bwtDir, int k, int thresh, bint filterReads, int numProcesses, int processNum):
     """ Gets reads from a fasta/fastq file, corrects them, and writes a new fasta/fastq file
     :param inFile: path to the input fasta/fastq file
     :param bwtDir: path to the directory in which the msbwt is
@@ -190,8 +189,7 @@ cpdef bytes correct(bytes inFile, bytes bwtDir, int k, int thresh, bint filterRe
     return tmpFile.name
 
 
-def driver(inFilename, bwtDir, maxReadLen, k=25, thresh=2, filterReads=True,
-           outFilename='corrected.fastq', numProcesses=1):
+def driver(inFilename, bwtDir, maxReadLen, k, thresh, filterReads, outFilename, numProcesses):
     """ Spawns processes that correct reads
     :param inFilename: path to the input fasta/fastq file containing reads
     :param bwtDir: path to the directory with the bwt in it
@@ -213,6 +211,12 @@ def driver(inFilename, bwtDir, maxReadLen, k=25, thresh=2, filterReads=True,
     begin = clock()
     logging.info('Combining temporary files...')
     with open(outFilename, 'w') as outFile:
+        # copy headers from input file
+        with open(inFilename) as inFile:
+            read = inFile.readline()
+            while not read.startswith(('@', '>')):
+                outFile.write(read)
+                read = inFile.readline()
         for fastq in fastqs:
             with open(fastq) as inFile:
                 for line in inFile:
@@ -233,10 +237,11 @@ def buildLCP(bwtDir, maxReadLen):
 def main():
     # set up parser
     parser = argparse.ArgumentParser()
+    parser.add_argument('bwtDir', help='the directory containing the MSBWT')
+    parser.add_argument('maxReadLength', type=int, help='the length of the longest read in the input file')
     parser.add_argument('inFile', help='the input fasta/fastq file of reads')
-    parser.add_argument('-b', '--bwtDir', metavar='bwtDir', dest='bwtDir', required=True, help='the directory containing the MSBWT')
-    parser.add_argument('-l', '--maxReadLength', metavar='maxReadLength', required=True, type=int, dest='maxReadLen',
-                        help='the length of the longest read in the input file')
+    parser.add_argument('-f', '--filter', dest='filterReads', action='store_true', default=False,
+                        help='filter reads with uncorrectable errors')
     parser.add_argument('-k', default=25, metavar='k', type=int, dest='k', help='k-mer size')
     parser.add_argument('-t', '--threshold', metavar='threshold', type=int, default=2, dest='thresh',
                         help='k-mers that occur more than this threshold will be trusted')
@@ -244,8 +249,6 @@ def main():
                         help='the output fasta/fastq file of corrected reads')
     parser.add_argument('-p', default=1, metavar='numProcesses', type=int, dest='numProcesses',
                         help='number of processes to use')
-    parser.add_argument('--Filter', dest='filterReads', metavar='filterReads', action='store_true', default=False,
-                        help='Filter reads with uncorrectable errors')
 
     # parse and check args
     args = parser.parse_args()
@@ -267,5 +270,5 @@ def main():
         raise Exception('%s: Not a valid MSBWT directory' % args.bwtDir)
 
     # do correction
-    driver(args.inFile, args.bwtDir, args.maxReadLen, args.k, args.thresh, args.noFilter,
+    driver(args.inFile, args.bwtDir, args.maxReadLen, args.k, args.thresh, args.filterReads,
            outFile, args.numProcesses)

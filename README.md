@@ -18,7 +18,14 @@ System Requirements
 FMRC has been tested using Python 2.7. The package is distributed with both Cython and the
 corresponding C files.  We recommend using installing Cython prior to installing this package.
 
-Three Python modules are required to run the code.
+Four Python modules are required to run the code.
+
+*[numpy] - Tested with numpy 1.9.1
+
+NumPy is a scientific computing package for Python. Its latest package can be downloaded from:
+
+	http://sourceforge.net/projects/numpy/files/
+
 
 *[msbwt] - Tested with msbwt 0.2.5
 
@@ -27,15 +34,15 @@ msbwt is used to build the BWT and FM-index that FMRC uses to count k-mers. Its 
     http://github.com/holtjma/msbwt
 
 
-*[pysam] - Tested with pysam 0.7.4
+*[pysam] - Tested with pysam 0.8.3
 
 As a wrapper of Samtools, the pysam module facilitates the manipulation of SAM/BAM files in Python. Its latest
 package can be downloaded from:
 
-	http://code.google.com/p/pysam/
+	https://github.com/pysam-developers/pysam
 
 
-*[argparse] - Tested with argparse 1.2.1
+*[argparse] - Tested with argparse 1.1
 
 The argparse module is used to parse the command line arguments of the module. It has been maintained in Python
 Standard Library since Python 2.7.  Its latest package can be downloaded from:

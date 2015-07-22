@@ -6,8 +6,6 @@ from setuptools import setup
 from setuptools import Extension
 from setuptools.command.sdist import sdist as _sdist
 
-from MUS import util
-
 #borrowed from online code: http://stackoverflow.com/questions/4505747/how-should-i-structure-a-python-package-that-contains-cython-code
 try:
     from Cython.Distutils import build_ext
@@ -30,7 +28,7 @@ if useCython:
         def run(self):
             # Make sure the compiled Cython files in the distribution are up-to-date
             from Cython.Build import cythonize
-            cythonize('fmrc.pyx', include_path=[np.get_include()])
+            cythonize('fmrc/correct.pyx', include_path=[np.get_include()])
             _sdist.run(self)
     cmdClass['sdist'] = sdist
 
@@ -45,8 +43,9 @@ setup(name='fmrc',
       author_email='sgreens@cs.unc.edu',
       license='MIT',
       install_requires=['pysam', 'numpy'],
+      scripts=['bin/fmrc'],
       packages=['fmrc'],
       zip_safe=False,
       include_dirs=[np.get_include()],
       ext_modules=extModules,
-      cmdclass = cmdClass)
+      cmdclass=cmdClass)
