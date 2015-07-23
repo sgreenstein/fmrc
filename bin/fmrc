@@ -1,0 +1,6 @@
+#! /bin/env python
+
+from fmrc import correct
+
+if __name__ == '__main__':
+	correct.main()
