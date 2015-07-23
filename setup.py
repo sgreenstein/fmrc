@@ -5,6 +5,7 @@
 from setuptools import setup
 from setuptools import Extension
 from setuptools.command.sdist import sdist as _sdist
+from fmrc import util
 
 #borrowed from online code: http://stackoverflow.com/questions/4505747/how-should-i-structure-a-python-package-that-contains-cython-code
 try:
@@ -36,7 +37,7 @@ else:
     extModules += [Extension('fmrc.correct', ['fmrc/correct.c'])]
 
 setup(name='fmrc',
-      version='0.0.1',
+      version=util.VERSION,
       description='Corrects errors in short reads from high-throughput sequencing',
       url='http://github.com/sgreenstein/fmrc',
       author='Seth Greenstein',

@@ -57,13 +57,13 @@ installation.
 
 	easy_install fmrc
 
-Alternatively, users can download the tarball of source from
+Alternatively, users can download the source from
 
 	https://github.com/sgreenstein/fmrc
 
 and then type:
 
-	easy_install fmrc-<version>.tar.gz
+	easy_install fmrc-master.zip
 
 By default, the package will be installed under the directory of Python dist-packages, and the executable of
 fmrc can be found under '/usr/local/bin/'.

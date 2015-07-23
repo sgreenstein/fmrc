@@ -12,6 +12,7 @@ from multiprocessing import Pool
 from os import remove, path
 from string import maketrans
 from functools import partial
+import util
 import cython
 import numpy as np
 cimport numpy as np
@@ -249,6 +250,7 @@ def main():
                         help='the output fasta/fastq file of corrected reads')
     parser.add_argument('-p', default=1, metavar='numProcesses', type=int, dest='numProcesses',
                         help='number of processes to use')
+    parser.add_argument('-v', '--version', action='version', version='fmrc version ' + util.VERSION)
 
     # parse and check args
     args = parser.parse_args()
@@ -258,11 +260,11 @@ def main():
         outFile += args.inFile[args.inFile.rfind('.'):]
     if not path.isfile(args.inFile):
         raise Exception('%s: No such file' % args.inFile)
-    if not 0 < args.k < args.maxReadLen:
-        raise Exception('k must satisfy 0 < k < maxReadLen')
+    if not 0 < args.k < args.maxReadLength:
+        raise Exception('k must satisfy 0 < k < maxReadLength')
     if args.thresh < 1:
         raise Exception('threshold must be a positive integer')
-    if args.maxReadLen <= 0:
+    if args.maxReadLength <= 0:
         raise Exception('maxReadLength must be a positive integer')
     try:
         msbwt.loadBWT(args.bwtDir)
@@ -270,5 +272,5 @@ def main():
         raise Exception('%s: Not a valid MSBWT directory' % args.bwtDir)
 
     # do correction
-    driver(args.inFile, args.bwtDir, args.maxReadLen, args.k, args.thresh, args.filterReads,
+    driver(args.inFile, args.bwtDir, args.maxReadLength, args.k, args.thresh, args.filterReads,
            outFile, args.numProcesses)
