@@ -4,8 +4,7 @@ Introduction
 ============
 
 FMRC is a tool for correcting errors in short reads from high-throughput sequencing.
-For detailed usage, type
-    fmrc -h
+For detailed usage, type `fmrc -h`
 
 References
 ==========
@@ -87,20 +86,20 @@ After installation, fmrc will be located in '/home/$USER/.local/lib/python/dist-
 Parameter Selection
 ===================
 
-## _k_-mer Multiplicity Threshold
+* _k_-mer Multiplicity Threshold
 
-The number of times _k_-mer appears in the reads must exceed this threshold in order for the _k_-mer to be trusted.
+The number of times a _k_-mer appears in the reads must exceed this threshold in order for the _k_-mer to be trusted.
 The optimal setting depends on the coverage. The default threshold of 2 is recommended, but a threshold of 1 may be
 tried for low-coverage samples or a higher threshold for higher coverage.
 
-## _k_
+* _k_
 
 The length of the _k_-mers to use. Longer _k_-mers are better able to distinguish between similar sequence, making
 it less likely that one portion of the genome will be "corrected" to look like another. If a read has no _k_ consecutive
 error-free bases, it cannot be corrected, so shorter _k_-mers are better able to correct reads with many errors. Small
 changes to _k_ do not drastically alter the results.
 
-## Read Filtering
+* Read Filtering
 
 This option filters out reads that are suspected to contain errors, none of which can be corrected. This occurs when
 there exist no _k_ consecutive error-free bases in the read. This option is recommended.
