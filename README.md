@@ -14,10 +14,17 @@ References
 System Requirements
 ===================
 
-FMRC has been tested using Python 2.7. The package is distributed with both Cython and the
-corresponding C files.  We recommend using installing Cython prior to installing this package.
+FMRC has been tested using Python 2.7.
 
-Four Python modules are required to run the code.
+Five Python modules are required to run the code.
+
+
+* cython - Tested with cython 0.20.1
+
+Cython is an optimising static compiler for both the Python programming language and the extended Cython programming
+language. Its latest package can be downloaded from
+http://cython.org/#download
+
 
 * numpy - Tested with numpy 1.9.1
 
