@@ -2,7 +2,7 @@
 #cython: wraparound=False
 
 from MUSCython import MultiStringBWTCython as msbwt, LCPGen
-from MUSCython.BasicBWT cimport BasicBWT
+from MUSCython.BasicBWT cimport BasicBWT, bwtRange
 from time import clock
 from tempfile import NamedTemporaryFile
 import logging
@@ -25,44 +25,58 @@ cdef list NUM_TO_BASE = ['A', 'C', 'G', 'N', 'T', '$']
 
 cdef bytes TRAN_TAB = maketrans('ACGT', 'TGCA')  # for reverse complementation
 
-def fastaParser(bytes fasta, int start, int end):
-    """ Generator for reading fasta/fastq files.
-    Yields 4-tuple: seq id, seq, and: + and qual string if fastq, 2 empty strings if fasta
-    :param fasta: path to the fasta or fastq file
-    :param start: index of the read at which to start parsing
-    :param end: index of the read at which to stop parsing (exclusive)
+
+cdef int isFastq(bytes fileName):
+    """
+    :param fileName:
+    :return: 1 if fileName is a fastq file, 0 if fastq
     :raise Exception: If input file contains neither a '@' nor a '>'
     """
-    cdef long _
-    cdef bytes fileType = None
     # determine file type by looking for sequence identifiers
-    with open(fasta, 'r') as fp:
+    cdef int fastq = -1
+    with open(fileName, 'r') as fp:
         lastPos = fp.tell()
         try:
-            while not fileType:
+            while fastq == -1:
                 lastPos = fp.tell()
                 line = fp.readline()
                 if line.startswith('@'):
-                    fileType = bytes('fastq')
+                    fastq = True
                 elif line.startswith('>'):
-                    fileType = bytes('fasta')
+                    fastq = False
         except StopIteration:
             raise Exception('Input file could not be parsed as fastq or fasta')
+    return fastq
+
+
+def fastqParser(bytes fastq, int processNum, int numProcesses):
+    """ Generator for reading fasta/fastq files.
+    Yields 4-tuple: seq id, seq, and: + and qual string if fastq, 2 empty strings if fasta
+    :param processNum: 0-based number of this process
+    :param numProcesses: number of processes
+    :param fastq: path to the fasta or fastq file
+    :raise Exception: If input file contains neither a '@' nor a '>'
+    """
+    cdef long _
     # parse file
-    fp = FastqFile(fasta)
+    fp = FastqFile(fastq)
     try:
-        for _ in xrange(start):
+        for _ in xrange(processNum):
             fp.next()
-        if fileType == 'fastq':
-            for _ in xrange(start, end):
+        if isFastq(fastq):
+            while True:
                 read = fp.next()
                 yield '@' + read.name + '\n', read.sequence + '\n', '+\n', read.quality + '\n'
+                for _ in xrange(numProcesses-1):
+                    fp.next()
         else:
-            for _ in xrange(start, end):
+            while True:
                 read = fp.next()
                 yield '>' + read.name + '\n', read.sequence + '\n', '', ''
+                for _ in xrange(numProcesses-1):
+                    fp.next()
     except StopIteration:
-        logging.warning('Input %s file does not contain as many reads as the BWT', fileType)
+        pass
     fp.close()
 
 
@@ -85,7 +99,8 @@ cpdef bytes correct(bytes inFile, bytes bwtDir, int k, int thresh, bint filterRe
     cdef np.ndarray[np.uint64_t] newCounts
     cdef int readsPerProcess = (bwt.getSymbolCount(0) / numProcesses) + 1
     cdef int i, kmersEnd, kmersStart, readLen
-    cdef long lo, hi, rcLo, rcHi, bestSupport, support
+    cdef long bestSupport, support
+    cdef bwtRange rc, newRange, forwardRange
     cdef bytes readName, origRead, plus, qual, base
     cdef np.uint8_t bestBase
     cdef bint changeMade
@@ -94,12 +109,10 @@ cpdef bytes correct(bytes inFile, bytes bwtDir, int k, int thresh, bint filterRe
     cdef long readsDone = 0
 
     tmpFile = NamedTemporaryFile(dir=bwtDir, suffix=inFile[inFile.rfind('.'):], delete=False)
-    logging.info('Process %d / %d: correcting reads %d through %d', processNum, numProcesses,
-                 readsPerProcess*processNum, min(readsPerProcess * (processNum+1), bwt.getSymbolCount(0))-1)
+    logging.info('%d reads according to BWT', bwt.getSymbolCount(0)-1)
+    logging.info('Process %d / %d starting', processNum+1, numProcesses)
     with tmpFile:
-        for readName, origRead, plus, qual in \
-                fastaParser(inFile, readsPerProcess*processNum,
-                            min(readsPerProcess * (processNum+1), bwt.getSymbolCount(0))):
+        for readName, origRead, plus, qual in fastqParser(inFile, processNum, numProcesses):
             # get counts for revcomp k-mers
             read = origRead
             readLen = len(origRead)-1
@@ -108,8 +121,8 @@ cpdef bytes correct(bytes inFile, bytes bwtDir, int k, int thresh, bint filterRe
             trusted = (revCounts > thresh).astype(np.uint8)
             corrected = np.zeros(readLen, dtype=np.uint8)
             readsDone += 1
-            if printProgress and not readsDone & 1048575:
-                logging.info('%d reads done', readsPerProcess*processNum + readsDone)
+            if printProgress and not readsDone % 20000:
+                logging.info('%d reads done', readsDone*numProcesses)
             if False in trusted:
                 # not all trusted from revcomp counts. Get forward counts
                 counts = bwt.countStrandedSeqMatchesNoOther(origRead[:readLen], k)
@@ -126,13 +139,12 @@ cpdef bytes correct(bytes inFile, bytes bwtDir, int k, int thresh, bint filterRe
                                     # err at read[i+k]
                                     bestSupport = 0
                                     bestBase = read[i+k]
-                                    newLo, newHi = bwt.findIndicesOfStr(read[i+k-1:i:-1].translate(TRAN_TAB))
+                                    newRange = bwt.findRangeOfStr(read[i+k-1:i:-1].translate(TRAN_TAB))
                                     # try alternate bases
                                     for base in BASES:
-                                        rcLo = bwt.getOccurrenceOfCharAtIndex(BASE_TO_NUM[base.translate(TRAN_TAB)], newLo)
-                                        rcHi = bwt.getOccurrenceOfCharAtIndex(BASE_TO_NUM[base.translate(TRAN_TAB)], newHi)
-                                        lo, hi = bwt.findIndicesOfStr(read[i+1:i+k] + base)
-                                        support = hi - lo + rcHi - rcLo
+                                        rc = bwt.getOccurrenceOfCharAtRange(BASE_TO_NUM[base.translate(TRAN_TAB)], newRange)
+                                        forwardRange = bwt.findRangeOfStr(read[i+1:i+k] + base)
+                                        support = forwardRange.h - forwardRange.l + rc.h - rc.l
                                         if support > bestSupport:
                                             bestSupport = support
                                             bestBase = ord(base)
@@ -153,13 +165,12 @@ cpdef bytes correct(bytes inFile, bytes bwtDir, int k, int thresh, bint filterRe
                                 # err at read[i]
                                 bestSupport = 0
                                 bestBase = read[i]
-                                newLo, newHi = bwt.findIndicesOfStr(read[i+1:i+k])
+                                newRange = bwt.findRangeOfStr(read[i+1:i+k])
                                 # try alternate bases
                                 for base in BASES:
-                                    lo = bwt.getOccurrenceOfCharAtIndex(BASE_TO_NUM[base], newLo)
-                                    hi = bwt.getOccurrenceOfCharAtIndex(BASE_TO_NUM[base], newHi)
-                                    rcLo, rcHi = bwt.findIndicesOfStr((read[i+k-1:i:-1] + base).translate(TRAN_TAB))
-                                    support = hi - lo + rcHi - rcLo
+                                    forwardRange = bwt.getOccurrenceOfCharAtRange(BASE_TO_NUM[base], newRange)
+                                    rc = bwt.findRangeOfStr((read[i+k-1:i:-1] + base).translate(TRAN_TAB))
+                                    support = forwardRange.h - forwardRange.l + rc.h - rc.l
                                     if support > bestSupport:
                                         bestSupport = support
                                         bestBase = ord(base)
@@ -201,6 +212,7 @@ def driver(inFilename, bwtDir, maxReadLen, k, thresh, filterReads, outFilename, 
     :param outFilename: name of the fasta/fastq file to which to write corrected reads
     :param numProcesses: number of concurrent processes to use
     """
+    cdef int numLines, _
     logging.basicConfig(format='%(asctime)s %(message)s', level=logging.INFO)
     if not path.isfile(path.join(bwtDir, 'lcps.npy')):
         buildLCP(bwtDir, maxReadLen)
@@ -218,11 +230,18 @@ def driver(inFilename, bwtDir, maxReadLen, k, thresh, filterReads, outFilename, 
             while not read.startswith(('@', '>')):
                 outFile.write(read)
                 read = inFile.readline()
-        for fastq in fastqs:
-            with open(fastq) as inFile:
-                for line in inFile:
+        inFiles = map(open, fastqs)
+        # write a line from each file in round-robin fashion
+        numLines = 4 if isFastq(inFilename) else 2
+        line = True
+        while line:
+            for inFile in inFiles:
+                for _ in xrange(numLines):
+                    line = inFile.readline()
                     outFile.write(line)
-            remove(fastq)
+        for inFile in inFiles:
+            inFile.close()
+        map(remove, fastqs)
     logging.info('Combined temporary files in %.2f s', clock() - begin)
     logging.info('Corrected reads saved in %s', outFilename)
 
