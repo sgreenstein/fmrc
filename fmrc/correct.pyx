@@ -86,6 +86,7 @@ cpdef bytes correct(bytes inFile, bytes bwtDir, int k, int thresh, bint filterRe
     :param bwtDir: path to the directory in which the msbwt is
     :param k: k-mer length
     :param thresh: if a k-mer's count exceeds this threshold, it is trusted
+    :param filterReads: do not output reads which have no trusted k-mers
     :param numProcesses: how many concurrent processes there are
     :param processNum: the 0-based index of this process
     :return: path to the fasta/fastq file of corrected reads
@@ -250,7 +251,7 @@ def buildLCP(bwtDir, maxReadLen):
     logging.info('Building LCP array')
     begin = clock()
     cdef np.ndarray[np.uint8_t] lcps = LCPGen.lcpGenerator(bwtDir, maxReadLen+1, logging.getLogger())
-    np.save(bwtDir + 'lcps.npy', lcps)
+    np.save(path.join(bwtDir, 'lcps.npy'), lcps)
     logging.info('Finished building LCP in %d s', clock() - begin)
 
 
