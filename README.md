@@ -3,13 +3,12 @@
 Introduction
 ============
 
-FMRC is a tool for correcting errors in short reads from high-throughput sequencing.
-For detailed usage, type `fmrc -h`
+FMRC is a command line tool for correcting errors in DNA short reads from high-throughput sequencing. It uses a Burrows-Wheeler Transform and FM-index to enable a k-mer counting approach for correcting substitution, insertion, and deletion errors. In general, it corrects errors more effectively than other error correction tools, leading to better alignments and de novo assemblies. It takes as input a FASTA or FASTQ file containing reads as well as a multi-string Burrows-Wheeler Transform built from the reads, and outputs a FASTA or FASTQ file containing the corrected reads.
 
 References
 ==========
 
-> S. Greenstein, J. Holt, and L. McMillan. "Accurate Error Correction in Short Reads using FMRC," July 2015.
+> S. Greenstein, J. Holt, and L. McMillan, “Short read error correction using an fm-index,” in Bioinformatics and Biomedicine (BIBM), 2015 IEEE International Conference on. IEEE, 2015, pp. 101–104.
 
 System Requirements
 ===================
@@ -110,3 +109,100 @@ changes to _k_ do not drastically alter the results.
 
 This option filters out reads that are suspected to contain errors, none of which can be corrected. This occurs when
 there exist no _k_ consecutive error-free bases in the read. This option is recommended.
+
+Detailed Description
+===========
+
+FMRC takes two inputs:
+
+(1) FASTQ or FASTA files containing reads
+
+This file contains the reads that you wish to correct. Each read in a FASTA file has the following specification: A single-line description beginning with a ">" symbol, followed by one or more lines containing the sequence of the read. Each read in FASTQ format must have: (1) A with the read identifier preceded by the "@" symbol, (2) the read sequence, (3) a line starting with the "+" that may or may not repeat the read identifier, and (4) the quality values for the read. Further specification of FASTA and FASTQ files can be found at https://en.wikipedia.org/wiki/FASTQ_format and https://en.wikipedia.org/wiki/FASTA_format. FMRC does not take into account pairing for paired-end reads. Multiple FASTA/FASTQ files can be corrected in series.
+
+(2) A Multi-string Burrows-Wheeler Transform (MSBWT) built from all reads from a sample
+
+To make the MSBWT, the msbwt package must be installed using the instructions on http://github.com/holtjma/msbwt. The `cffq` function must be used to build the MSBWT from all the FASTQ/FASTA files for a sample. The usage of this function is as follows:
+
+    usage: msbwt cffq [-h] [-p numProcesses] [-u] [-c]
+                      outBwtDir inputFastqs [inputFastqs ...]
+
+    positional arguments:
+      outBwtDir         the output MSBWT directory
+      inputFastqs       the input FASTQ files
+
+    optional arguments:
+      -h, --help        show this help message and exit
+      -p numProcesses   number of processes to run (default: 1)
+      -u, --uniform     the input sequences have uniform length
+      -c, --compressed  build the RLE BWT (faster, less disk I/O)
+
+After the MSBWT is built using this function, FMRC can be run to output corrected versions of the FASTA/FASTQ files. The directory used as the input argument `outBwtDir` for `msbwt cffq` must be passed as the `bwtDir` argument to FMRC.
+
+The output of FMRC is the corrected reads in a new file that is the same format as the input file. For instance, if the original reads are in FASTQ format, the output will be a new FASTQ file containing the corrected reads.
+
+Example
+=======
+
+Say we wish to correct the reads from a sample. The reads are all 100bp and are stored in FASTQ format. The FASTQ file containing the reads is called raw_example.fastq. After installing msbwt and fmrc, we build the MSBWT:
+
+    msbwt cffq -p 4 -u -c bwt uncorrected_example.fastq
+
+This builds a compressed MSBWT in the directory "bwt" using 4 concurrent processes. Now we can run fmrc:
+
+    fmrc --filter -o corrected_example.fastq -p 4 bwt 100 raw_example.fastq
+
+This corrects the reads in raw_example.fastq using 4 concurrent processes. It filters out reads with uncorrectable errors, and outputs the corrected reads to corrected_example.fastq.
+
+Both the input and output FASTQ files used in this example are included in the source, allowing you to verify your installation is working correctly.
+
+
+API Specification
+===================
+
+If the methods exposed by FMRC are to be used by external software, refer to this specification.
+
+    cpdef bytes correct(bytes inFile, bytes bwtDir, int k, int thresh, bint filterReads, int numProcesses, int processNum):
+        """ Gets reads from a fasta/fastq file, corrects them, and writes a new fasta/fastq file
+        :param inFile: path to the input fasta/fastq file
+        :param bwtDir: path to the directory in which the msbwt is
+        :param k: k-mer length
+        :param thresh: if a k-mer's count exceeds this threshold, it is trusted
+        :param filterReads: do not output reads which have no trusted k-mers
+        :param numProcesses: how many concurrent processes there are
+        :param processNum: the 0-based index of this process
+        :return: path to the fasta/fastq file of corrected reads
+        """
+
+    def fastqParser(bytes fastq, int processNum, int numProcesses):
+        """ Generator for reading fasta/fastq files.
+        Yields 4-tuple: seq id, seq, and: + and qual string if fastq, 2 empty strings if fasta
+        :param processNum: 0-based number of this process
+        :param numProcesses: number of processes
+        :param fastq: path to the fasta or fastq file
+        :raise Exception: If input file contains neither a '@' nor a '>'
+        """
+
+    cdef int isFastq(bytes fileName):
+        """
+        :param fileName:
+        :return: 1 if fileName is a fastq file, 0 if fastq
+        :raise Exception: If input file contains neither a '@' nor a '>'
+        """
+
+    def driver(inFilename, bwtDir, maxReadLen, k, thresh, filterReads, outFilename, numProcesses):
+        """ Spawns processes that correct reads
+        :param inFilename: path to the input fasta/fastq file containing reads
+        :param bwtDir: path to the directory with the bwt in it
+        :param maxReadLen: length of the longest read in the bwt
+        :param k: k-mer length
+        :param thresh: if a k-mer's count exceeds this threshold, it is trusted
+        :param filterReads: if True, reads that have no trusted k-mers are not output
+        :param outFilename: name of the fasta/fastq file to which to write corrected reads
+        :param numProcesses: number of concurrent processes to use
+        """
+
+    def buildLCP(bwtDir, maxReadLen):
+        """ builds the longest common prefix array
+        :param bwtDir: directory containing the bwt
+        :param maxReadLen: length of the longest read (not including $ terminator)
+        """

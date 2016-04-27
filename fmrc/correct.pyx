@@ -248,6 +248,10 @@ def driver(inFilename, bwtDir, maxReadLen, k, thresh, filterReads, outFilename, 
 
 
 def buildLCP(bwtDir, maxReadLen):
+    """ builds the longest common prefix array
+    :param bwtDir: directory containing the bwt
+    :param maxReadLen: length of the longest read (not including $ terminator)
+    """
     logging.info('Building LCP array')
     begin = clock()
     cdef np.ndarray[np.uint8_t] lcps = LCPGen.lcpGenerator(bwtDir, maxReadLen+1, logging.getLogger())
